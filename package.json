@@ -1,0 +1,30 @@
+{
+  "name": "light-dance-2026",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "type-check": "tsc --noEmit",
+    "test:io": "npx -y tsx src/scripts/verifyIo.ts",
+    "test:storage": "npx -y tsx src/scripts/verifyStorage.ts",
+    "test:preview": "npx -y tsx src/scripts/verifyPreviewModel.ts",
+    "test:codegen": "npx -y tsx src/scripts/verifyCustomAnimCodegen.ts",
+    "test:integration": "npx -y tsx src/scripts/verifyIntegration.ts",
+    "test:fullino": "npx -y tsx src/scripts/verifyFullIno.ts",
+    "test:timeline": "npx -y tsx src/scripts/verifyTimeline.ts",
+    "test": "npm run test:io && npm run test:storage && npm run test:preview && npm run test:codegen && npm run test:integration && npm run test:fullino && npm run test:timeline"
+  },
+  "dependencies": {
+    "next": "^13.5.6",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "typescript": "^5.4.0"
+  }
+}

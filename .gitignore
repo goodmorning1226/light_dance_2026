@@ -1,0 +1,76 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Next.js
+.next/
+out/
+build/
+dist/
+
+# production
+.vercel/
+
+# TypeScript
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+tsconfig.buildinfo
+
+# testing / coverage
+coverage/
+.nyc_output/
+
+# logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+debug.log
+
+# environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# editor / IDE
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+
+# Arduino build files
+*.elf
+*.hex
+*.bin
+*.map
+*.eep
+*.lss
+*.sym
+
+# Arduino temporary folders
+build/
+.cache/
+arduino-cache/
+arduino-build/
+
+# Generated / temporary exports
+*.tmp
+*.bak
+*.backup
+
+# Optional: local dance/program exports
+# 若你想把匯出的 JSON / ino 也放進 git，下面兩行不要開
+# exports/
+# generated/
+
+# Claude / AI local workspace
+.claude/
