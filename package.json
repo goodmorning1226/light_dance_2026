@@ -17,6 +17,7 @@
     "test": "npm run test:io && npm run test:storage && npm run test:preview && npm run test:codegen && npm run test:integration && npm run test:fullino && npm run test:timeline"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
     "next": "^13.5.6",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"

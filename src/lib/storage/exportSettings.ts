@@ -1,5 +1,6 @@
 import { defaultExportSettings, type ExportSettings } from "@/types";
 import { readJson, writeJson } from "./backend";
+import { getCloudMirrorHooks } from "./cloudMirror";
 
 const KEY_EXPORT_SETTINGS = "ld26:exportSettings";
 
@@ -15,4 +16,5 @@ export function getExportSettings(): ExportSettings {
 
 export function saveExportSettings(settings: ExportSettings): void {
   writeJson(KEY_EXPORT_SETTINGS, settings);
+  getCloudMirrorHooks().onExportSettingsSaved?.(settings);
 }

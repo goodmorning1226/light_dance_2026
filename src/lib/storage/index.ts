@@ -1,4 +1,10 @@
 export { setStorageBackend, type KvStore } from "./backend";
+export {
+  setCloudMirrorHooks,
+  clearCloudMirrorHooks,
+  withSuppressedHooks,
+  type CloudMirrorHooks,
+} from "./cloudMirror";
 export { createId } from "./ids";
 export {
   getAllDances,

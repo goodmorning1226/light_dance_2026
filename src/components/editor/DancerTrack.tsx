@@ -10,6 +10,8 @@ interface Props {
   selectedEventId: string | null;
   ghostEvents?: ReadonlyArray<TimelineEvent>;
   currentBeat: number;
+  // eventId → display name of a remote collaborator currently editing it.
+  editorsByEventId?: Record<string, string>;
   onSelectEvent: (id: string) => void;
 }
 
@@ -24,6 +26,7 @@ export function DancerTrack({
   selectedEventId,
   ghostEvents,
   currentBeat,
+  editorsByEventId,
   onSelectEvent,
 }: Props) {
   const totalPx = Math.max(totalBeats * pxPerBeat, 240);
@@ -50,16 +53,20 @@ export function DancerTrack({
           onClick={() => {}}
         />
       ))}
-      {events.map((e) => (
-        <TimelineEventBlock
-          key={e.id}
-          event={e}
-          pxPerBeat={pxPerBeat}
-          selected={e.id === selectedEventId}
-          active={isActive(e)}
-          onClick={() => onSelectEvent(e.id)}
-        />
-      ))}
+      {events.map((e) => {
+        const editorName = editorsByEventId?.[e.id] ?? null;
+        return (
+          <TimelineEventBlock
+            key={e.id}
+            event={e}
+            pxPerBeat={pxPerBeat}
+            selected={e.id === selectedEventId}
+            active={isActive(e)}
+            editingByName={editorName}
+            onClick={() => onSelectEvent(e.id)}
+          />
+        );
+      })}
 
       <div
         style={{

@@ -9,6 +9,9 @@ interface Props {
   selected: boolean;
   ghost?: boolean;
   active?: boolean;
+  // Display name of another collaborator currently editing this event,
+  // surfaced via the realtime broadcast channel. `null`/undefined ⇒ nobody.
+  editingByName?: string | null;
   onClick: () => void;
 }
 
@@ -35,17 +38,33 @@ function bgColor(event: TimelineEvent): string {
 // One block on the timeline. Width = durationBeats × pxPerBeat. Click selects.
 // `ghost` styles the block as faded for cross-dancer reference; `active` pulses
 // the border when the playhead is inside this event.
-export function TimelineEventBlock({ event, pxPerBeat, selected, ghost, active, onClick }: Props) {
+export function TimelineEventBlock({
+  event,
+  pxPerBeat,
+  selected,
+  ghost,
+  active,
+  editingByName,
+  onClick,
+}: Props) {
   const left = event.startBeat * pxPerBeat;
   const width = Math.max(event.durationBeats * pxPerBeat, 8);
   const background = bgColor(event);
-  const borderColor = active ? "#dc2626" : selected ? "#1f6feb" : "#1e293b";
+  // editingByName takes priority for the border colour so collaborators are
+  // unmistakable even on the currently-selected block.
+  const borderColor = editingByName
+    ? "#b45309"
+    : active
+      ? "#dc2626"
+      : selected
+        ? "#1f6feb"
+        : "#1e293b";
   const opacity = ghost ? 0.25 : 1;
 
   return (
     <div
       onClick={onClick}
-      title={`${event.label ?? event.id} · ${event.startBeat}b → ${event.startBeat + event.durationBeats}b · ${event.actions.length} action${event.actions.length === 1 ? "" : "s"}`}
+      title={`${event.label ?? event.id} · ${event.startBeat}b → ${event.startBeat + event.durationBeats}b · ${event.actions.length} action${event.actions.length === 1 ? "" : "s"}${editingByName ? ` · ${editingByName} editing` : ""}`}
       style={{
         position: "absolute",
         left,
@@ -58,7 +77,11 @@ export function TimelineEventBlock({ event, pxPerBeat, selected, ghost, active, 
         opacity,
         cursor: ghost ? "default" : "pointer",
         overflow: "hidden",
-        boxShadow: active ? "0 0 0 1px #dc2626" : undefined,
+        boxShadow: editingByName
+          ? "0 0 0 2px rgba(180,83,9,0.35)"
+          : active
+            ? "0 0 0 1px #dc2626"
+            : undefined,
         transition: "border-color 0.1s",
       }}
     >
@@ -77,6 +100,24 @@ export function TimelineEventBlock({ event, pxPerBeat, selected, ghost, active, 
         {event.startBeat}b · {summarise(event)}
         {event.clearBefore ? " · ⌫" : ""}
       </div>
+      {editingByName && (
+        <div
+          style={{
+            position: "absolute",
+            top: -8,
+            right: 2,
+            background: "#b45309",
+            color: "white",
+            padding: "0 6px",
+            borderRadius: 999,
+            fontSize: 9,
+            fontWeight: 700,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {editingByName}
+        </div>
+      )}
     </div>
   );
 }

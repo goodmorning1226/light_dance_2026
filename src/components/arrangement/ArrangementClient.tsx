@@ -23,6 +23,8 @@ import {
   exportProgramToJson,
   importDanceFromJson,
 } from "@/lib/io";
+import { useCloud } from "@/components/cloud/CloudModeProvider";
+import { getCloudId } from "@/lib/supabase/cloudIdMap";
 import { ProgramItemRow } from "./ProgramItemRow";
 import { ExportPanel } from "./ExportPanel";
 import { ExportSettingsForm } from "./ExportSettingsForm";
@@ -31,6 +33,7 @@ type Notice = { kind: "info" | "error"; text: string } | null;
 
 export function ArrangementClient() {
   const router = useRouter();
+  const cloud = useCloud();
   const [program, setProgram] = useState<ProgramArrangement | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
   const [exportSettings, setExportSettings] = useState<ExportSettings>(defaultExportSettings);
@@ -39,6 +42,35 @@ export function ArrangementClient() {
     setProgram(getProgram());
     setExportSettings(getExportSettings());
   }, []);
+
+  // Re-read from localStorage when realtime applies arrangement / export
+  // changes from another collaborator.
+  const programItemsCounter = cloud.counters.programItems;
+  const danceCounter = cloud.counters.dances;
+  useEffect(() => {
+    setProgram(getProgram());
+  }, [programItemsCounter, danceCounter]);
+
+  const exportSettingsCounter = cloud.counters.exportSettings;
+  useEffect(() => {
+    setExportSettings(getExportSettings());
+  }, [exportSettingsCounter]);
+
+  // Pull stable callback out so the effect doesn't re-fire on every
+  // counter bump / presence sync (which would re-publish presence and
+  // can flicker on the receiver side). updateMyPresence is wrapped in
+  // useCallback with empty deps inside the provider — stable identity.
+  const { updateMyPresence } = cloud;
+  const inCloud = cloud.state !== null;
+  // Publish presence so collaborators know we're on the arrangement page.
+  useEffect(() => {
+    if (!inCloud) return;
+    updateMyPresence({
+      currentView: "arrangement",
+      currentDanceId: undefined,
+      currentEventId: undefined,
+    });
+  }, [inCloud, updateMyPresence]);
 
   const updateExportSettings = (next: ExportSettings) => {
     setExportSettings(next);
@@ -183,12 +215,23 @@ export function ArrangementClient() {
           </div>
         ) : (
           <div className="col" style={{ gap: 8 }}>
-            {program.items.map((item, idx) => (
+            {program.items.map((item, idx) => {
+              const pid = cloud.state?.program.id ?? null;
+              // In Local Mode the badge is hidden entirely (cloudSync=null).
+              // In Cloud Mode an item is "synced" iff BOTH its program_items
+              // row and its referenced dance row have cloud-id mappings —
+              // either missing means a teammate would see a dangling ref.
+              const cloudSync: boolean | null = pid
+                ? getCloudId(pid, "programItems", item.id) !== null &&
+                  getCloudId(pid, "dances", item.danceId) !== null
+                : null;
+              return (
               <ProgramItemRow
                 key={item.id}
                 item={item}
                 index={idx}
                 total={program.items.length}
+                cloudSync={cloudSync}
                 onEdit={() => handleEdit(item)}
                 onUpdateMqtt={(cmd) => handleUpdateMqtt(item.id, cmd)}
                 onDelete={() => handleDelete(item.id)}
@@ -197,7 +240,8 @@ export function ArrangementClient() {
                 onMoveDown={() => handleMove(item.id, 1)}
                 onExportDanceJson={() => handleExportDanceJson(item)}
               />
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

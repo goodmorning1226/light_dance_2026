@@ -1,6 +1,7 @@
 import type { DanceProject } from "@/types";
 import { parseDanceProject } from "@/lib/io";
 import { readJson, removeKey, writeJson } from "./backend";
+import { getCloudMirrorHooks } from "./cloudMirror";
 import { createId } from "./ids";
 import { getProgram, saveProgram } from "./program";
 
@@ -49,6 +50,7 @@ export function saveDance(dance: DanceProject): void {
   else list.push(dance);
   saveAllDances(list);
   syncSnapshotInProgram(dance);
+  getCloudMirrorHooks().onDanceSaved?.(dance);
 }
 
 // Keep ProgramItem.dance snapshots fresh whenever the underlying dance is
@@ -71,6 +73,7 @@ export function deleteDance(id: string): void {
   if (getCurrentDanceId() === id) {
     setCurrentDanceId(null);
   }
+  getCloudMirrorHooks().onDanceDeleted?.(id);
 }
 
 export function duplicateDance(id: string): DanceProject {

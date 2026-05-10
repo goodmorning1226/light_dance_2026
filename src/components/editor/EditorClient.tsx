@@ -11,6 +11,8 @@ import {
   saveDance,
   setCurrentDanceId,
 } from "@/lib/storage";
+import { useCloud } from "@/components/cloud/CloudModeProvider";
+import { getCloudId } from "@/lib/supabase/cloudIdMap";
 import {
   exportDanceToJson,
   importDanceFromJson,
@@ -71,6 +73,8 @@ function saveEditorUiState(state: EditorUiState): void {
 }
 
 export function EditorClient() {
+  const cloud = useCloud();
+
   const [dance, setDance] = useState<DanceProject | null>(null);
   const [allDances, setAllDances] = useState<DanceProject[]>([]);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
@@ -115,6 +119,117 @@ export function EditorClient() {
       setSelectedEventIdState(migrated.timelineEvents?.[0]?.id ?? null);
     }
   }, []);
+
+  // Re-read from localStorage when realtime announces a dance change.
+  // The cloud-sync layer applies the incoming row via the SAME storage
+  // helpers (with mirror hooks suppressed), so by the time this counter
+  // ticks the source of truth is already updated — we just refresh local
+  // React state.
+  const danceCounter = cloud.counters.dances;
+  useEffect(() => {
+    if (danceCounter === 0) return;
+    const all = getAllDances();
+    setAllDances(all);
+    setDance((prev) => {
+      if (!prev) return prev;
+      const fresh = all.find((d) => d.id === prev.id);
+      return fresh ?? prev;
+    });
+  }, [danceCounter]);
+
+  // Pull stable callbacks out so we can depend on THEM (they're useCallback
+  // with empty deps inside the provider) rather than the whole `cloud`
+  // object — which gets a fresh reference on every counter bump or
+  // presence sync. Depending on `cloud` would re-fire the editing effect
+  // constantly, sending false→true bursts that show up as a flicker on
+  // the other clients' indicator border.
+  const { updateMyPresence, sendEditing } = cloud;
+  const inCloud = cloud.state !== null;
+
+  // Publish presence: which dance / event / view we're currently looking at.
+  useEffect(() => {
+    if (!inCloud) return;
+    updateMyPresence({
+      currentDanceId: dance?.id,
+      currentEventId: selectedEventId ?? undefined,
+      currentView: "editor",
+      dancerTab:
+        viewMode === "all" ? -1 : Number(viewMode.dancerId) || 0,
+    });
+  }, [inCloud, updateMyPresence, dance?.id, selectedEventId, viewMode]);
+
+  // Broadcast editing-indicator transitions: every time the selection
+  // changes, claim the new event and release the previous one. The TTL on
+  // the receiving side prunes stale entries even if a "release" message is
+  // dropped in transit.
+  useEffect(() => {
+    if (!inCloud) return;
+    if (selectedEventId) {
+      sendEditing({
+        danceId: dance?.id ?? null,
+        eventId: selectedEventId,
+        sectionId: null,
+        editing: true,
+      });
+    }
+    return () => {
+      if (selectedEventId) {
+        sendEditing({
+          danceId: dance?.id ?? null,
+          eventId: selectedEventId,
+          sectionId: null,
+          editing: false,
+        });
+      }
+    };
+  }, [inCloud, sendEditing, selectedEventId, dance?.id]);
+
+  // Build a per-event display-name map from incoming editing broadcasts.
+  const editorsByEventId = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const entry of Object.values(cloud.editing)) {
+      if (!entry.editing || !entry.eventId) continue;
+      // Only show editors who are on the same dance the user is viewing.
+      if (entry.danceId && dance?.id && entry.danceId !== dance.id) continue;
+      map[entry.eventId] = entry.displayName;
+    }
+    return map;
+  }, [cloud.editing, dance?.id]);
+
+  // Split the dance list into "cloud-synced for the active program" vs
+  // "this-browser-only" so the user can immediately tell which dances
+  // their teammates can see. The check is `cloudIdMap` membership: a
+  // local dance.id present in the map is mirrored to a cloud row, anything
+  // else is local-only (either created before joining the program, or
+  // simply never pushed). Recomputed on counter bumps because realtime
+  // INSERTs add new mappings.
+  const activeProgramId = cloud.state?.program.id ?? null;
+  // lastSyncedAt re-flips the flags after our OWN save completes — the
+  // cloud-id mapping is created synchronously inside saveCloudDance, but
+  // only React state changes can trigger a re-render. The realtime echo
+  // would also do it, except recordSelfSave swallows our own echoes.
+  const lastSyncedAt = cloud.lastSyncedAt;
+  const danceCloudFlags = useMemo(() => {
+    const flags: Record<string, boolean> = {};
+    if (!activeProgramId) return flags;
+    for (const d of allDances) {
+      flags[d.id] = getCloudId(activeProgramId, "dances", d.id) !== null;
+    }
+    return flags;
+    // danceCounter handles other-client changes; lastSyncedAt handles ours.
+  }, [allDances, activeProgramId, danceCounter, lastSyncedAt]);
+  const currentDanceIsCloud = dance ? !!danceCloudFlags[dance.id] : false;
+  const { cloudDances, localOnlyDances } = useMemo(() => {
+    if (!activeProgramId) {
+      return { cloudDances: [] as DanceProject[], localOnlyDances: allDances };
+    }
+    const cloudList: DanceProject[] = [];
+    const localList: DanceProject[] = [];
+    for (const d of allDances) {
+      (danceCloudFlags[d.id] ? cloudList : localList).push(d);
+    }
+    return { cloudDances: cloudList, localOnlyDances: localList };
+  }, [allDances, activeProgramId, danceCloudFlags]);
 
   const persistUi = (next: Partial<EditorUiState>) => {
     saveEditorUiState({ viewMode, showGhostEvents, selectedEventId, ...next });
@@ -325,10 +440,52 @@ export function EditorClient() {
         <strong>LED Dance Editor</strong>
         <span className="muted">·</span>
         <select value={dance.id} onChange={(e) => handleSwitchDance(e.target.value)}>
-          {allDances.map((d) => (
-            <option key={d.id} value={d.id}>{d.name}</option>
-          ))}
+          {activeProgramId ? (
+            <>
+              <optgroup label={`☁  Cloud · ${cloud.state?.program.name ?? ""}`}>
+                {cloudDances.map((d) => (
+                  <option key={d.id} value={d.id}>☁ {d.name}</option>
+                ))}
+                {cloudDances.length === 0 && (
+                  <option disabled value="">(no cloud dances yet)</option>
+                )}
+              </optgroup>
+              <optgroup label="💻  Local only (this browser)">
+                {localOnlyDances.map((d) => (
+                  <option key={d.id} value={d.id}>💻 {d.name}</option>
+                ))}
+                {localOnlyDances.length === 0 && (
+                  <option disabled value="">(none)</option>
+                )}
+              </optgroup>
+            </>
+          ) : (
+            allDances.map((d) => (
+              <option key={d.id} value={d.id}>{d.name}</option>
+            ))
+          )}
         </select>
+        {activeProgramId && (
+          <span
+            title={
+              currentDanceIsCloud
+                ? "This dance is mirrored to the cloud — your edits sync to teammates."
+                : "This dance lives only in this browser. Click Push local on the cloud bar to share it."
+            }
+            style={{
+              padding: "2px 8px",
+              borderRadius: 999,
+              fontSize: 11,
+              fontWeight: 600,
+              border: "1px solid",
+              background: currentDanceIsCloud ? "#dcfce7" : "#fef3c7",
+              borderColor: currentDanceIsCloud ? "#16a34a" : "#d97706",
+              color: currentDanceIsCloud ? "#166534" : "#92400e",
+            }}
+          >
+            {currentDanceIsCloud ? "☁ Cloud" : "💻 Local only"}
+          </span>
+        )}
         <button onClick={handleNewDance}>+ New</button>
         <span className="spacer" />
         {savedAt && <span className="muted">Saved {savedAt.toLocaleTimeString()}</span>}
@@ -394,6 +551,7 @@ export function EditorClient() {
             pxPerBeat={PX_PER_BEAT}
             selectedEventId={selectedEventId}
             currentBeat={currentBeat}
+            editorsByEventId={editorsByEventId}
             onSelectEvent={setSelectedEventId}
             onAddEvent={handleAddEvent}
             onAddSection={addSection}

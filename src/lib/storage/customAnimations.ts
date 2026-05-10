@@ -1,6 +1,7 @@
 import type { CustomAnimation } from "@/types";
 import { parseCustomAnimation } from "@/lib/io";
 import { readJson, writeJson } from "./backend";
+import { getCloudMirrorHooks } from "./cloudMirror";
 
 const KEY_CUSTOM_ANIMATIONS = "ld26:customAnimations";
 
@@ -31,9 +32,11 @@ export function saveCustomAnimation(animation: CustomAnimation): void {
   if (idx >= 0) list[idx] = animation;
   else list.push(animation);
   writeJson(KEY_CUSTOM_ANIMATIONS, list);
+  getCloudMirrorHooks().onCustomAnimationSaved?.(animation);
 }
 
 export function deleteCustomAnimation(id: string): void {
   const list = loadCustomAnimations().filter((a) => a.id !== id);
   writeJson(KEY_CUSTOM_ANIMATIONS, list);
+  getCloudMirrorHooks().onCustomAnimationDeleted?.(id);
 }

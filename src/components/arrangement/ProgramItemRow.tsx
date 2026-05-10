@@ -6,6 +6,11 @@ interface Props {
   item: ProgramItem;
   index: number;
   total: number;
+  // Cloud-sync hints. `cloudSync` is null in Local Mode (no badge shown),
+  // true if both the program_item AND the underlying dance are mirrored
+  // to cloud, false if only local. Computed by the parent because it
+  // owns the cloud session context.
+  cloudSync: boolean | null;
   onEdit: () => void;
   onUpdateMqtt: (cmd: string) => void;
   onDelete: () => void;
@@ -19,6 +24,7 @@ export function ProgramItemRow({
   item,
   index,
   total,
+  cloudSync,
   onEdit,
   onUpdateMqtt,
   onDelete,
@@ -46,6 +52,27 @@ export function ProgramItemRow({
           #{index + 1}
         </span>
         <strong style={{ fontSize: 16 }}>{dance?.name ?? "(deleted dance)"}</strong>
+        {cloudSync !== null && (
+          <span
+            title={
+              cloudSync
+                ? "Mirrored to the cloud — visible to teammates."
+                : "Not yet on cloud (still pushing or local-only)."
+            }
+            style={{
+              padding: "1px 6px",
+              borderRadius: 999,
+              fontSize: 10,
+              fontWeight: 600,
+              border: "1px solid",
+              background: cloudSync ? "#dcfce7" : "#fef3c7",
+              borderColor: cloudSync ? "#16a34a" : "#d97706",
+              color: cloudSync ? "#166534" : "#92400e",
+            }}
+          >
+            {cloudSync ? "☁" : "💻"}
+          </span>
+        )}
         {orphaned && (
           <span
             className="error"

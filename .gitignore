@@ -1,27 +1,30 @@
-# dependencies
+# ---------- Dependencies ----------
 node_modules/
 .pnp
 .pnp.js
+.yarn/install-state.gz
 
-# Next.js
+# ---------- Next.js ----------
 .next/
 out/
 build/
 dist/
+.swc/
 
-# production
+# ---------- Vercel ----------
 .vercel/
 
-# TypeScript
+# ---------- TypeScript ----------
 *.tsbuildinfo
 tsconfig.tsbuildinfo
 tsconfig.buildinfo
+next-env.d.ts.bak
 
-# testing / coverage
+# ---------- Testing / Coverage ----------
 coverage/
 .nyc_output/
 
-# logs
+# ---------- Logs ----------
 logs/
 *.log
 npm-debug.log*
@@ -30,24 +33,33 @@ yarn-error.log*
 pnpm-debug.log*
 debug.log
 
-# environment variables
+# ---------- Environment variables ----------
+# 注意：所有 .env / .env.* 都會 ignore，但保留 *.example 範本
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*
+!.env*.example
+!.env.example
 
-# OS generated files
+# ---------- Certificates / Secrets ----------
+*.pem
+*.key
+*.crt
+
+# ---------- OS ----------
 .DS_Store
 Thumbs.db
+ehthumbs.db
+Desktop.ini
 
-# editor / IDE
+# ---------- Editor / IDE ----------
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
 .idea/
+*.swp
+*.swo
 
-# Arduino build files
+# ---------- Arduino build artifacts ----------
 *.elf
 *.hex
 *.bin
@@ -55,22 +67,23 @@ Thumbs.db
 *.eep
 *.lss
 *.sym
-
-# Arduino temporary folders
-build/
 .cache/
 arduino-cache/
 arduino-build/
 
-# Generated / temporary exports
+# ---------- Generated / temporary ----------
 *.tmp
 *.bak
 *.backup
 
-# Optional: local dance/program exports
-# 若你想把匯出的 JSON / ino 也放進 git，下面兩行不要開
+# ---------- Optional: local exports ----------
+# 若你想把匯出的 JSON / ino 也納入 git，下面兩行不要開
 # exports/
 # generated/
 
-# Claude / AI local workspace
+# ---------- Claude / AI local workspace ----------
 .claude/
+
+# ---------- Supabase (local CLI) ----------
+supabase/.branches
+supabase/.temp

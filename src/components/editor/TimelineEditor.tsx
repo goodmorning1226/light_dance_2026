@@ -14,6 +14,7 @@ interface Props {
   pxPerBeat: number;
   selectedEventId: string | null;
   currentBeat: number;
+  editorsByEventId?: Record<string, string>;
   onSelectEvent: (id: string) => void;
   onAddEvent: () => void;
   onAddSection: () => void;
@@ -36,6 +37,7 @@ export function TimelineEditor({
   pxPerBeat,
   selectedEventId,
   currentBeat,
+  editorsByEventId,
   onSelectEvent,
   onAddEvent,
   onAddSection,
@@ -155,6 +157,7 @@ export function TimelineEditor({
                 selectedEventId={selectedEventId}
                 ghostEvents={t.ghosts}
                 currentBeat={currentBeat}
+                {...(editorsByEventId !== undefined ? { editorsByEventId } : {})}
                 onSelectEvent={onSelectEvent}
               />
             ))}

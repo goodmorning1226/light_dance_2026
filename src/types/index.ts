@@ -6,3 +6,4 @@ export * from "./dance";
 export * from "./program";
 export * from "./exportSettings";
 export * from "./timeline";
+export * from "./cloud";

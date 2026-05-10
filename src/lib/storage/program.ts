@@ -1,6 +1,7 @@
 import type { DanceProject, ProgramArrangement, ProgramItem } from "@/types";
 import { parseProgramArrangement } from "@/lib/io";
 import { readJson, writeJson } from "./backend";
+import { getCloudMirrorHooks } from "./cloudMirror";
 import { createId } from "./ids";
 
 const KEY_PROGRAM = "ld26:program";
@@ -31,6 +32,7 @@ function loadProgram(): ProgramArrangement {
 
 function persistProgram(program: ProgramArrangement): void {
   writeJson(KEY_PROGRAM, program);
+  getCloudMirrorHooks().onProgramSaved?.(program);
 }
 
 function applyPartial<T extends object>(base: T, patch: Partial<T>): T {
