@@ -6,6 +6,7 @@ import type {
   ExportSettings,
   ProgramArrangement,
 } from "@/types";
+import { getDance } from "@/lib/storage";
 import { getSupabaseClient } from "./client";
 import { getCloudId, getOrCreateCloudId, setCloudId } from "./cloudIdMap";
 import { recordSelfSave } from "./recentSelfSaves";
@@ -22,6 +23,13 @@ export async function saveCloudDance(
   programId: string,
   dance: DanceProject,
 ): Promise<void> {
+  // Defense against the create-then-quickly-delete race: by the time a
+  // 600ms-debounced save fires, the user may already have deleted the
+  // dance. Without this guard, getOrCreateCloudId would mint a fresh uuid
+  // and the upsert would resurrect the row on cloud, then re-appear after
+  // re-join. The debouncer is also cancelled in onDanceDeleted; this is a
+  // belt-and-braces second line of defense in case the cancel was missed.
+  if (!getDance(dance.id)) return;
   const supabase = getSupabaseClient();
   const { cloudId } = getOrCreateCloudId(programId, "dances", dance.id);
   const { error } = await supabase.from("dances").upsert(
@@ -220,6 +228,16 @@ export function flushDebouncedSaves(): Promise<void> {
     all.push(entry.pending().catch((e) => console.error(`[flushDebouncedSaves:${key}]`, e)));
   }
   return Promise.all(all).then(() => undefined);
+}
+
+// Discard any pending debounced save for `key` without firing it. Required
+// before deleting an entity so a still-queued save doesn't resurrect it on
+// cloud after the delete went through.
+export function cancelDebouncedSave(key: string): void {
+  const entry = debouncers.get(key);
+  if (!entry) return;
+  window.clearTimeout(entry.timer);
+  debouncers.delete(key);
 }
 
 // Re-exported here so consumers don't need to remember a separate module.

@@ -2,6 +2,7 @@ import type { DanceProject } from "@/types";
 import { parseDanceProject } from "@/lib/io";
 import { readJson, removeKey, writeJson } from "./backend";
 import { getCloudMirrorHooks } from "./cloudMirror";
+import { removeDanceOrigin } from "./danceOrigin";
 import { createId } from "./ids";
 import { getProgram, saveProgram } from "./program";
 
@@ -73,7 +74,12 @@ export function deleteDance(id: string): void {
   if (getCurrentDanceId() === id) {
     setCurrentDanceId(null);
   }
+  // Fire the cloud-mirror hook BEFORE we wipe the origin record so the hook
+  // can read the origin synchronously (e.g. to skip cloud delete for
+  // local-only dances). The hook body runs synchronously even though its
+  // inner cloud call is fire-and-forget.
   getCloudMirrorHooks().onDanceDeleted?.(id);
+  removeDanceOrigin(id);
 }
 
 export function duplicateDance(id: string): DanceProject {

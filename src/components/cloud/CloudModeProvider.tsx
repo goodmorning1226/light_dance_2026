@@ -32,16 +32,17 @@ import {
   loadCloudProgram,
 } from "@/lib/supabase/programs";
 import {
+  cancelDebouncedSave,
   debounceSave,
   deleteCloudCustomAnimation,
   deleteCloudDance,
   flushDebouncedSaves,
-  pushLocalSnapshotToCloud,
   saveCloudArrangement,
   saveCloudCustomAnimation,
   saveCloudDance,
   saveCloudExportSettings,
 } from "@/lib/supabase/sync";
+import { clearCloudIdMap } from "@/lib/supabase/cloudIdMap";
 import {
   type RealtimeSubscription,
   subscribeToProgramRealtime,
@@ -62,11 +63,15 @@ import { applyRealtimeEvent } from "@/lib/supabase/applyRealtime";
 import { clearRecentSelfSaves } from "@/lib/supabase/recentSelfSaves";
 import {
   clearCloudMirrorHooks,
-  getAllCustomAnimations,
+  deleteDance,
   getAllDances,
-  getExportSettings,
-  getProgram,
+  getDanceOrigin,
+  isLocalOnlyDance,
+  saveCustomAnimation,
+  saveDance,
   setCloudMirrorHooks,
+  setDanceOrigin,
+  withSuppressedHooks,
 } from "@/lib/storage";
 
 const CLOUD_SESSION_KEY = "ld26:cloud.activeProgramId";
@@ -257,11 +262,24 @@ export function CloudModeProvider({ children }: { children: ReactNode }) {
 
     setCloudMirrorHooks({
       onDanceSaved: (dance: DanceProject) => {
+        // Local-only dances never sync to cloud, no matter what triggered
+        // the save. The origin flag is set when the user picks "+ New
+        // (Local)" or pre-existing dances are marked at enter time.
+        if (isLocalOnlyDance(dance.id)) return;
         debounceSave(`dance:${dance.id}`, SAVE_DEBOUNCE_MS, () =>
           runSave("save dance", () => saveCloudDance(pid, dance)),
         );
       },
       onDanceDeleted: (id: string) => {
+        // CRUCIAL: kill any pending debounced save before the delete goes
+        // out. Without this, a "+ Cloud → quickly delete" sequence races —
+        // the save fires after the delete and resurrects the row on cloud,
+        // which then re-appears next time the user joins the program.
+        cancelDebouncedSave(`dance:${id}`);
+        // No cloud row exists for a local-only dance — skip the round-trip.
+        // This hook fires before storage clears the origin record (see
+        // dances.ts) so isLocalOnlyDance still returns the correct answer.
+        if (isLocalOnlyDance(id)) return;
         // Deletes are not debounced — there's no value in coalescing a
         // delete with a later save of a re-created entity. Run immediately.
         void runSave("delete dance", () => deleteCloudDance(pid, id));
@@ -277,6 +295,8 @@ export function CloudModeProvider({ children }: { children: ReactNode }) {
         );
       },
       onCustomAnimationDeleted: (id: string) => {
+        // Same race as dances — cancel any in-flight debounced save first.
+        cancelDebouncedSave(`customAnim:${id}`);
         void runSave("delete custom animation", () => deleteCloudCustomAnimation(pid, id));
       },
       onExportSettingsSaved: (settings: ExportSettings) => {
@@ -478,11 +498,58 @@ export function CloudModeProvider({ children }: { children: ReactNode }) {
   const enterProgram = useCallback(
     async (programId: string, displayName: string) => {
       setStatus("connecting");
+      // Snapshot pre-existing local dance ids BEFORE we mirror cloud rows
+      // down. Anything still on this list after the cloud sync that DOESN'T
+      // appear in the cloud snapshot is a private local draft → flag it as
+      // local-only so the mirror hook leaves it alone going forward.
+      const preExistingLocalIds = new Set(getAllDances().map((d) => d.id));
+
       const snap = await loadCloudProgram(programId);
       const auth = await getCurrentAuthSession();
       if (!auth) throw new Error("Not signed in after RPC — should not happen");
       const me = snap.members.find((m) => m.userId === auth.userId);
       if (!me) throw new Error("Joined program but membership row not visible — RLS issue?");
+
+      // Mirror cloud dances + custom animations into localStorage BEFORE we
+      // flip status to "connected", so the moment the editor sees the new
+      // state it can also read the cloud content via getAllDances() /
+      // getAllCustomAnimations(). Without this the user sees an empty cloud
+      // section right after Join and only a manual page refresh fills it
+      // in (because EditorClient's mount-time read happens before
+      // enterProgram's localStorage writes).
+      //
+      // Origin classification for dances:
+      //   - local id was already present  → "cloud-mine" (round-trip)
+      //   - local id was NOT present      → "cloud-imported" (teammate's,
+      //     gets cleaned up on leave)
+      const cloudLocalIds = new Set<string>();
+      withSuppressedHooks(() => {
+        for (const cloudDance of snap.dances) {
+          const localId = cloudDance.danceJson.id;
+          cloudLocalIds.add(localId);
+          saveDance(cloudDance.danceJson);
+          setDanceOrigin(
+            localId,
+            preExistingLocalIds.has(localId) ? "cloud-mine" : "cloud-imported",
+          );
+        }
+        for (const cloudCustom of snap.customAnimations) {
+          saveCustomAnimation(cloudCustom.animationJson);
+        }
+      });
+
+      // Pre-existing local dances that DIDN'T match a cloud row are private
+      // drafts. Mark them local-only so the mirror won't push them on the
+      // next save (this is what fixes the "default new dance gets pushed
+      // automatically when I create a program" issue). Existing origin is
+      // preserved for explicitly-classified dances.
+      for (const localId of preExistingLocalIds) {
+        if (cloudLocalIds.has(localId)) continue;
+        if (getDanceOrigin(localId) === null) {
+          setDanceOrigin(localId, "local-only");
+        }
+      }
+
       setSnapshot(snap);
       setState({
         program: snap.program,
@@ -493,6 +560,14 @@ export function CloudModeProvider({ children }: { children: ReactNode }) {
       });
       setStatus("connected");
       setLastSyncedAt(new Date());
+
+      // Notify subscribers (Editor / Library) that the dance + custom lists
+      // changed so they re-read from localStorage. Without these bumps the
+      // newly-mirrored cloud rows are invisible until the next page refresh
+      // even though they're already on disk.
+      if (snap.dances.length > 0) bumpCounter("dances");
+      if (snap.customAnimations.length > 0) bumpCounter("customAnimations");
+
       try {
         window.localStorage.setItem(CLOUD_SESSION_KEY, programId);
       } catch {
@@ -500,29 +575,19 @@ export function CloudModeProvider({ children }: { children: ReactNode }) {
         // will simply not auto-resume. Non-fatal.
       }
     },
-    [],
+    [bumpCounter],
   );
 
   const createProgram = useCallback(
     async (programName: string, displayName: string) => {
       try {
         const { programId, shareCode } = await createCloudProgram(programName, displayName);
+        // Note: we deliberately do NOT auto-push existing local dances.
+        // The previous behavior dragged the user's "New Dance" draft into
+        // the freshly-created shared program against their will. Now they
+        // pick per-dance via "+ New (Cloud)" / "+ New (Local)" or push the
+        // whole batch via the explicit Push button.
         await enterProgram(programId, displayName);
-        // Push whatever the user already had locally up to the new cloud
-        // program so they don't lose their work.
-        try {
-          await pushLocalSnapshotToCloud(programId, {
-            dances: getAllDances(),
-            arrangement: getProgram(),
-            customAnimations: getAllCustomAnimations(),
-            exportSettings: getExportSettings(),
-          });
-          setLastSyncedAt(new Date());
-        } catch (e) {
-          reportError(
-            `initial upload: ${e instanceof Error ? e.message : String(e)}`,
-          );
-        }
         return { shareCode };
       } catch (e) {
         reportError(`createProgram: ${e instanceof Error ? e.message : String(e)}`);
@@ -546,6 +611,43 @@ export function CloudModeProvider({ children }: { children: ReactNode }) {
   );
 
   const leaveProgram = useCallback(() => {
+    // Strict separation: in local mode we should NOT see any dance that
+    // belongs to the cloud program. So at leave time we evict every dance
+    // we tagged as cloud-mine OR cloud-imported. Only local-only (and
+    // unmarked legacy) dances stay in localStorage. Cloud rows are
+    // untouched on the server — re-joining will re-pull what's actually
+    // on cloud (which will not include anything we genuinely deleted via
+    // the Delete button while in cloud mode).
+    const programId = stateRef.current?.program.id ?? null;
+    const cloudDanceIds = getAllDances()
+      .filter((d) => {
+        const o = getDanceOrigin(d.id);
+        return o === "cloud-mine" || o === "cloud-imported";
+      })
+      .map((d) => d.id);
+
+    // Cancel pending debounced saves first so flushDebouncedSaves (in the
+    // storage-hook effect cleanup) doesn't push these dances after we've
+    // deleted them locally.
+    for (const id of cloudDanceIds) {
+      cancelDebouncedSave(`dance:${id}`);
+    }
+    if (cloudDanceIds.length > 0) {
+      // Suppress hooks: we don't want the local delete to fire onDanceDeleted
+      // and erase the row on the server. We're just shedding our local
+      // mirror; the cloud copy stays.
+      withSuppressedHooks(() => {
+        for (const id of cloudDanceIds) {
+          deleteDance(id);
+        }
+      });
+      bumpCounter("dances");
+    }
+
+    // Wipe the local-id ↔ cloud-id mapping so a re-join starts from a clean
+    // slate (loadCloudProgram will reseed it from the snapshot).
+    if (programId) clearCloudIdMap(programId);
+
     setState(null);
     setSnapshot(null);
     setStatus("local");
@@ -557,7 +659,7 @@ export function CloudModeProvider({ children }: { children: ReactNode }) {
     } catch {
       // ignore
     }
-  }, []);
+  }, [bumpCounter]);
 
   const reloadProgram = useCallback(async () => {
     if (!state) return;
@@ -575,16 +677,33 @@ export function CloudModeProvider({ children }: { children: ReactNode }) {
     }
   }, [state, reportError]);
 
+  // "Push local" only promotes private (local-only / unmarked legacy)
+  // dances to cloud-mine. It deliberately skips:
+  //   - cloud-mine dances → already auto-syncing via the mirror; resending
+  //     would be a redundant network hit.
+  //   - cloud-imported dances → those are teammates' work; pushing our
+  //     possibly-stale local copy would overwrite their newer edits.
+  // It also no longer pushes arrangement / custom animations / export
+  // settings as a batch — those sync continuously through their own
+  // mirror hooks, and a wholesale push could clobber a teammate's
+  // arrangement reorder mid-session.
   const pushLocalToCloud = useCallback(async () => {
     if (!state) return;
+    const pid = state.program.id;
+    const candidates = getAllDances().filter((d) => {
+      const o = getDanceOrigin(d.id);
+      return o === "local-only" || o === null;
+    });
+    if (candidates.length === 0) {
+      flashSaved();
+      return;
+    }
     setStatus("saving");
     try {
-      await pushLocalSnapshotToCloud(state.program.id, {
-        dances: getAllDances(),
-        arrangement: getProgram(),
-        customAnimations: getAllCustomAnimations(),
-        exportSettings: getExportSettings(),
-      });
+      for (const dance of candidates) {
+        await saveCloudDance(pid, dance);
+        setDanceOrigin(dance.id, "cloud-mine");
+      }
       flashSaved();
     } catch (e) {
       reportError(`push: ${e instanceof Error ? e.message : String(e)}`);

@@ -4,12 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import type { DanceProject, TimelineEvent } from "@/types";
 import {
   addDanceToProgram,
+  deleteDance,
   getAllCustomAnimations,
   getAllDances,
   getCurrentDanceId,
   getDance,
   saveDance,
   setCurrentDanceId,
+  setDanceOrigin,
 } from "@/lib/storage";
 import { useCloud } from "@/components/cloud/CloudModeProvider";
 import { getCloudId } from "@/lib/supabase/cloudIdMap";
@@ -151,20 +153,51 @@ export function EditorClient() {
     }
   }, []);
 
-  // Re-read from localStorage when realtime announces a dance change.
-  // The cloud-sync layer applies the incoming row via the SAME storage
-  // helpers (with mirror hooks suppressed), so by the time this counter
-  // ticks the source of truth is already updated — we just refresh local
-  // React state.
+  // Re-read from localStorage when realtime (or leaveProgram) announces a
+  // dance change. The cloud-sync layer applies incoming rows via the SAME
+  // storage helpers (with mirror hooks suppressed), so by the time this
+  // counter ticks the source of truth is already updated — we just refresh
+  // local React state. Three cases:
+  //   1. Current dance still exists → just refresh its content.
+  //   2. Current dance was removed (e.g. leaveProgram evicted all cloud
+  //      dances) but other dances remain → switch to the first one.
+  //   3. No dances remain → seed a fresh local-only empty so the editor
+  //      doesn't get stuck on a null dance.
   const danceCounter = cloud.counters.dances;
   useEffect(() => {
     if (danceCounter === 0) return;
     const all = getAllDances();
     setAllDances(all);
+    if (all.length === 0) {
+      const fresh = migrateStepsToTimelineEvents(createEmptyDance());
+      setDanceOrigin(fresh.id, "local-only");
+      saveDance(fresh);
+      setCurrentDanceId(fresh.id);
+      setDance(fresh);
+      setAllDances([fresh]);
+      setSelectedEventIdState(fresh.timelineEvents?.[0]?.id ?? null);
+      setCurrentBeat(0);
+      setPlaying(false);
+      return;
+    }
     setDance((prev) => {
-      if (!prev) return prev;
+      if (!prev) {
+        const next = all[0]!;
+        setCurrentDanceId(next.id);
+        setSelectedEventIdState(next.timelineEvents?.[0]?.id ?? null);
+        setCurrentBeat(0);
+        setPlaying(false);
+        return next;
+      }
       const fresh = all.find((d) => d.id === prev.id);
-      return fresh ?? prev;
+      if (fresh) return fresh;
+      // Current dance vanished from storage — switch to the first remaining.
+      const next = all[0]!;
+      setCurrentDanceId(next.id);
+      setSelectedEventIdState(next.timelineEvents?.[0]?.id ?? null);
+      setCurrentBeat(0);
+      setPlaying(false);
+      return next;
     });
   }, [danceCounter]);
 
@@ -335,8 +368,17 @@ export function EditorClient() {
     setPlaying(false);
   };
 
-  const handleNewDance = () => {
+  // Create a fresh dance. `origin` controls whether the cloud-mirror hook
+  // pushes it on save:
+  //   - "local-only" → never sync (private draft)
+  //   - "cloud-mine" → mirror to cloud immediately (shared with teammates)
+  //   - null         → unmarked; behaves as cloud-mine if a cloud session
+  //                    is later joined (default for local-mode users)
+  // Set origin BEFORE saveDance so the mirror hook sees the correct flag
+  // synchronously when it fires.
+  const handleNewDance = (origin: "local-only" | "cloud-mine" | null) => {
     const fresh = migrateStepsToTimelineEvents(createEmptyDance());
+    if (origin !== null) setDanceOrigin(fresh.id, origin);
     saveDance(fresh);
     setCurrentDanceId(fresh.id);
     setDance(fresh);
@@ -344,6 +386,37 @@ export function EditorClient() {
     setSelectedEventId(fresh.timelineEvents?.[0]?.id ?? null);
     setCurrentBeat(0);
     setPlaying(false);
+    flash({
+      kind: "info",
+      text:
+        origin === "local-only"
+          ? "Created a local-only dance (won't sync to cloud)."
+          : origin === "cloud-mine"
+            ? "Created a cloud dance — visible to teammates."
+            : "Created a new dance.",
+    });
+  };
+
+  // Delete the current dance. Cloud sync fires automatically through the
+  // storage hook (suppressed for local-only dances since they have no cloud
+  // row). If this was the last remaining dance, auto-create a fresh
+  // local-only empty so the editor doesn't end up in an unloadable state.
+  const handleDeleteDance = () => {
+    if (!dance) return;
+    const idToDelete = dance.id;
+    const name = dance.name;
+    if (!window.confirm(`Delete dance "${name}"? This cannot be undone.`)) return;
+    const remaining = getAllDances().filter((d) => d.id !== idToDelete);
+    deleteDance(idToDelete);
+    setAllDances(remaining);
+    if (remaining[0]) {
+      handleSwitchDance(remaining[0].id);
+      flash({ kind: "info", text: `Deleted "${name}".` });
+    } else {
+      // No dances left — seed a blank local-only one so the editor has
+      // something to render. The user can promote / push later if they want.
+      handleNewDance("local-only");
+    }
   };
 
   const handleSave = () => {
@@ -587,7 +660,33 @@ export function EditorClient() {
             {currentDanceIsCloud ? "☁ Cloud" : "💻 Local only"}
           </span>
         )}
-        <button onClick={handleNewDance}>+ New</button>
+        {activeProgramId ? (
+          <>
+            <button
+              onClick={() => handleNewDance("local-only")}
+              title="Create a private dance that stays in this browser"
+            >
+              + Local
+            </button>
+            <button
+              className="primary"
+              onClick={() => handleNewDance("cloud-mine")}
+              title="Create a dance shared with this program's members"
+            >
+              + Cloud
+            </button>
+          </>
+        ) : (
+          <button onClick={() => handleNewDance(null)}>+ New</button>
+        )}
+        <button
+          className="danger"
+          onClick={handleDeleteDance}
+          title={`Delete "${dance.name}"`}
+          disabled={!dance}
+        >
+          🗑 Delete
+        </button>
         <span className="spacer" />
         {savedAt && <span className="muted">Saved {savedAt.toLocaleTimeString()}</span>}
         <button className="primary" onClick={handleSave}>Save Dance</button>

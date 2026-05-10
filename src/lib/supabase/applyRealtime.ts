@@ -10,11 +10,13 @@ import type {
 import {
   deleteCustomAnimation,
   deleteDance,
+  getDanceOrigin,
   getProgram,
   saveCustomAnimation,
   saveDance,
   saveExportSettings,
   saveProgram,
+  setDanceOrigin,
   withSuppressedHooks,
 } from "@/lib/storage";
 import {
@@ -99,6 +101,12 @@ function applyDanceEvent(
   const dance = row.dance_json;
   if (!dance || typeof dance !== "object" || !dance.id) return null;
   setCloudId(programId, "dances", dance.id, row.id);
+  // Origin: only set if we have no opinion yet. A teammate's INSERT for a
+  // dance we'd never seen → "cloud-imported" so leaveProgram can reclaim it.
+  // We never overwrite "cloud-mine" / "local-only" already set by us.
+  if (getDanceOrigin(dance.id) === null) {
+    setDanceOrigin(dance.id, "cloud-imported");
+  }
   withSuppressedHooks(() => saveDance(dance));
   return { kind: "dances", type: event.type };
 }
