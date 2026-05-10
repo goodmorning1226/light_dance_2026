@@ -17,6 +17,9 @@ interface Props {
   editorsByEventId?: Record<string, string>;
   onSelectEvent: (id: string) => void;
   onSeek: (beat: number) => void;
+  // Drag-to-move: parent decides whether the new position is accepted
+  // (returns true) or should bounce back (returns false → overlap).
+  onDragMoveEvent: (eventId: string, deltaBeats: number) => boolean;
   // Per-dancer "+ Event" button (renders next to the dancer label). Creates a
   // personal event locked to this dancer.
   onAddPersonalEvent: (dancerId: number) => void;
@@ -36,6 +39,7 @@ export function TimelineEditor({
   editorsByEventId,
   onSelectEvent,
   onSeek,
+  onDragMoveEvent,
   onAddPersonalEvent,
   onOpenCommonEventModal,
   onAddSection,
@@ -192,6 +196,7 @@ export function TimelineEditor({
                 currentBeat={currentBeat}
                 {...(editorsByEventId !== undefined ? { editorsByEventId } : {})}
                 onSelectEvent={onSelectEvent}
+                onDragMove={onDragMoveEvent}
               />
             ))}
             {tracks.length === 0 && (

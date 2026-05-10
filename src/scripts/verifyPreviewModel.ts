@@ -21,6 +21,7 @@ function check(label: string, ok: boolean, detail?: string): void {
 
 console.log("\n=== Static action paints right slots ===");
 {
+  // body composite paints all 5 torso slots; hat composite paints all 3 hat zones.
   const step: DanceStep = {
     id: "s1",
     durationBeats: 1,
@@ -30,9 +31,11 @@ console.log("\n=== Static action paints right slots ===");
     ],
   };
   const d = computeStepDisplay(step, dancers);
-  check("dancer 1 body painted", d[0]?.slots.body?.r === 255);
-  check("dancer 1 hat painted", d[0]?.slots.hat?.r === 255);
-  check("dancer 1 leftArm not painted", d[0]?.slots.leftArm === undefined);
+  check("dancer 1 shirt painted", d[0]?.slots.shirt?.r === 255);
+  check("dancer 1 collar painted", d[0]?.slots.collar?.r === 255);
+  check("dancer 1 lowerShirt painted", d[0]?.slots.lowerShirt?.r === 255);
+  check("dancer 1 hatMark painted", d[0]?.slots.hatMark?.r === 255);
+  check("dancer 1 leftUpperArm not painted", d[0]?.slots.leftUpperArm === undefined);
   check("dancer 2 untouched", Object.keys(d[1]?.slots ?? {}).length === 0);
 }
 
@@ -45,8 +48,8 @@ console.log("\n=== Composite parts ===");
     actions: [{ type: "static", dancers: [1], parts: ["arms"], color: { r: 0, g: 255, b: 0 } }],
   };
   const d = computeStepDisplay(armsStep, dancers);
-  check("arms paints leftArm", d[0]?.slots.leftArm?.g === 255);
-  check("arms paints rightArm", d[0]?.slots.rightArm?.g === 255);
+  check("arms paints leftUpperArm", d[0]?.slots.leftUpperArm?.g === 255);
+  check("arms paints rightLowerArm", d[0]?.slots.rightLowerArm?.g === 255);
   check("arms does not paint hands", d[0]?.slots.leftHand === undefined);
 
   const handsStep: DanceStep = {
@@ -65,10 +68,10 @@ console.log("\n=== Composite parts ===");
     actions: [{ type: "static", dancers: [1], parts: ["whole"], color: { r: 100, g: 100, b: 100 } }],
   };
   const dw = computeStepDisplay(wholeStep, dancers);
-  check("whole paints all 8 slots", Object.keys(dw[0]?.slots ?? {}).length === PREVIEW_SLOTS.length);
+  check(`whole paints all ${PREVIEW_SLOTS.length} slots`, Object.keys(dw[0]?.slots ?? {}).length === PREVIEW_SLOTS.length);
 }
 
-console.log("\n=== Detailed parts collapse to slots ===");
+console.log("\n=== Detailed parts target their own atomic slot ===");
 {
   const step: DanceStep = {
     id: "s-detail",
@@ -83,15 +86,17 @@ console.log("\n=== Detailed parts collapse to slots ===");
     ],
   };
   const d = computeStepDisplay(step, dancers);
-  check("leftUpperArm → leftArm slot", d[0]?.slots.leftArm?.r === 1);
-  check("rightLowerArm → rightArm slot", d[0]?.slots.rightArm?.r === 2);
-  check("lowerShirt → body slot", d[0]?.slots.body?.r === 3);
-  check("leftCrotch → legs slot", d[0]?.slots.legs?.r === 4);
-  check("leftFoot → feet slot", d[0]?.slots.feet?.r === 5);
+  check("leftUpperArm targets its own slot", d[0]?.slots.leftUpperArm?.r === 1);
+  check("rightLowerArm targets its own slot", d[0]?.slots.rightLowerArm?.r === 2);
+  check("lowerShirt targets its own slot", d[0]?.slots.lowerShirt?.r === 3);
+  check("leftCrotch targets its own slot", d[0]?.slots.leftCrotch?.r === 4);
+  check("leftFoot targets its own slot", d[0]?.slots.leftFoot?.r === 5);
+  check("leftUpperArm did NOT bleed into leftLowerArm", d[0]?.slots.leftLowerArm === undefined);
 }
 
 console.log("\n=== Animation paints + adds label ===");
 {
+  // leftArm composite paints leftUpperArm + leftLowerArm
   const step: DanceStep = {
     id: "s-anim",
     durationBeats: 1,
@@ -107,7 +112,9 @@ console.log("\n=== Animation paints + adds label ===");
     ],
   };
   const d = computeStepDisplay(step, dancers);
-  check("LTR paints the part", d[0]?.slots.leftArm?.r === 200);
+  check("LTR paints leftUpperArm", d[0]?.slots.leftUpperArm?.r === 200);
+  check("LTR paints leftLowerArm", d[0]?.slots.leftLowerArm?.r === 200);
+  check("LTR does NOT paint leftHand (leftArm composite excludes hand)", d[0]?.slots.leftHand === undefined);
   check("LTR label added", d[0]?.labels.includes("LTR") === true);
   check("No label for dancer not in action", d[1]?.labels.length === 0);
 }
@@ -129,7 +136,7 @@ console.log("\n=== Rainbow paints all slots regardless of part ===");
     ],
   };
   const d = computeStepDisplay(step, dancers);
-  check("Rainbow paints all 8 slots", Object.keys(d[0]?.slots ?? {}).length === PREVIEW_SLOTS.length);
+  check(`Rainbow paints all ${PREVIEW_SLOTS.length} slots`, Object.keys(d[0]?.slots ?? {}).length === PREVIEW_SLOTS.length);
   check("Rainbow label added", d[0]?.labels.includes("Rainbow") === true);
 }
 
@@ -140,12 +147,12 @@ console.log("\n=== Multiple actions: later overrides earlier on the same slot ==
     durationBeats: 1,
     clearBefore: true,
     actions: [
-      { type: "static", dancers: [1], parts: ["body"], color: { r: 255, g: 0, b: 0 } },
-      { type: "static", dancers: [1], parts: ["body"], color: { r: 0, g: 255, b: 0 } },
+      { type: "static", dancers: [1], parts: ["shirt"], color: { r: 255, g: 0, b: 0 } },
+      { type: "static", dancers: [1], parts: ["shirt"], color: { r: 0, g: 255, b: 0 } },
     ],
   };
   const d = computeStepDisplay(step, dancers);
-  check("Latest paint wins", d[0]?.slots.body?.r === 0 && d[0]?.slots.body?.g === 255);
+  check("Latest paint wins", d[0]?.slots.shirt?.r === 0 && d[0]?.slots.shirt?.g === 255);
 }
 
 console.log("\n=== Null / empty step ===");

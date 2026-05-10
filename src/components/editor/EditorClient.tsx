@@ -27,6 +27,8 @@ import {
 import { migrateStepsToTimelineEvents } from "@/lib/editor/migration";
 import {
   collectTimelineWarnings,
+  findSectionForBeat,
+  hasOverlapForDancer,
   snapBeat,
   totalBeatsOf,
 } from "@/lib/editor/timelineHelpers";
@@ -507,6 +509,39 @@ export function EditorClient() {
     setJumpedSectionId("");
   };
 
+  // Drag-to-move callback for TimelineEventBlock. Returns true if the move
+  // was committed, false if it would have caused an overlap (the block then
+  // bounces back via its reject animation). Overlap is checked per-dancer
+  // (every dancer the event touches), excluding the event itself so a tiny
+  // drag of a few pixels that lands the event back on its own range still
+  // counts as accepted.
+  const handleDragMoveEvent = (eventId: string, deltaBeats: number): boolean => {
+    if (!dance) return false;
+    const events = dance.timelineEvents ?? [];
+    const orig = events.find((e) => e.id === eventId);
+    if (!orig) return false;
+    const newStart = Math.max(0, snapBeat(orig.startBeat + deltaBeats, dance.beatUnit));
+    if (newStart === orig.startBeat) return true; // no-op snap, treat as accepted
+    const dancersTouched = new Set<number>();
+    for (const a of orig.actions) for (const id of a.dancers) dancersTouched.add(id);
+    if (orig.lockedDancerId !== undefined) dancersTouched.add(orig.lockedDancerId);
+    for (const dId of dancersTouched) {
+      if (hasOverlapForDancer(events, dId, newStart, orig.durationBeats, eventId)) {
+        return false;
+      }
+    }
+    const updated: TimelineEvent = {
+      ...orig,
+      startBeat: newStart,
+      sectionId: findSectionForBeat(dance, newStart),
+    };
+    commitDance({
+      ...dance,
+      timelineEvents: events.map((e) => (e.id === eventId ? updated : e)),
+    });
+    return true;
+  };
+
   // Personal event entry point — opens the event modal locked to one
   // dancer. The modal handles authoring (duration, clearBefore, label,
   // actions) and runs the overlap check against the user-chosen duration on
@@ -786,6 +821,7 @@ export function EditorClient() {
             editorsByEventId={editorsByEventId}
             onSelectEvent={setSelectedEventId}
             onSeek={handleSeek}
+            onDragMoveEvent={handleDragMoveEvent}
             onAddPersonalEvent={handleAddPersonalEvent}
             onOpenCommonEventModal={openCommonEventModal}
             onAddSection={addSection}

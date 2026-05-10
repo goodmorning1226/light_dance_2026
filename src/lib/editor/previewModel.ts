@@ -1,52 +1,103 @@
 import type { BodyPartName, ColorRGB, DanceStep, Dancer, TimelineEvent } from "@/types";
 
-// The 8 simplified slots used by the visual preview, vs. the 30 BodyPartName
-// values the .ino library actually controls. The mapping table below collapses
-// each detailed part to the matching simplified slot(s).
+// One atomic preview slot for every visually-distinct region — chosen so
+// every BodyPartName in BODY_PART_NAMES paints at least one specific slot
+// (the user can therefore see exactly what their selected part would light
+// up). Composite parts ("whole", "hat", "body", "arms", "hands", "legs",
+// "feet", "leftArm", "rightArm") fan out to multiple atomic slots.
 export const PREVIEW_SLOTS = [
-  "hat",
-  "body",
-  "leftArm",
-  "rightArm",
+  // Hat (3 zones, left → right)
+  "beforeHatMark",
+  "hatMark",
+  "afterHatMark",
+  // Torso (5 zones)
+  "collar",
+  "leftZipper",
+  "shirt",
+  "rightZipper",
+  "lowerShirt",
+  // Arms (6 zones)
+  "leftUpperArm",
+  "leftLowerArm",
   "leftHand",
+  "rightUpperArm",
+  "rightLowerArm",
   "rightHand",
-  "legs",
-  "feet",
+  // Crotch row (3 zones)
+  "leftCrotch",
+  "crotch",
+  "rightCrotch",
+  // Legs (2 zones)
+  "leftLeg",
+  "rightLeg",
+  // Feet (2 zones)
+  "leftFoot",
+  "rightFoot",
 ] as const;
 export type PreviewSlot = (typeof PREVIEW_SLOTS)[number];
 
-const PART_TO_SLOTS: Record<BodyPartName, ReadonlyArray<PreviewSlot>> = {
+// Exported so the BodyPartsSelector can derive the coverage hierarchy
+// (which composite contains which atomic) without duplicating the table.
+export const PART_TO_SLOTS: Record<BodyPartName, ReadonlyArray<PreviewSlot>> = {
   whole: PREVIEW_SLOTS,
-  hat: ["hat"],
-  hatMark: ["hat"],
-  beforeHatMark: ["hat"],
-  afterHatMark: ["hat"],
-  body: ["body"],
-  shirt: ["body"],
-  collar: ["body"],
-  lowerShirt: ["body"],
-  leftZipper: ["body"],
-  rightZipper: ["body"],
-  arms: ["leftArm", "rightArm"],
-  leftArm: ["leftArm"],
-  leftUpperArm: ["leftArm"],
-  leftLowerArm: ["leftArm"],
-  rightArm: ["rightArm"],
-  rightUpperArm: ["rightArm"],
-  rightLowerArm: ["rightArm"],
+  // Hat: composite "hat" lights all three zones; each mark targets just itself
+  hat: ["beforeHatMark", "hatMark", "afterHatMark"],
+  hatMark: ["hatMark"],
+  beforeHatMark: ["beforeHatMark"],
+  afterHatMark: ["afterHatMark"],
+  // Torso: "body" lights everything torso-side, specific parts target their slot
+  body: ["collar", "leftZipper", "shirt", "rightZipper", "lowerShirt"],
+  shirt: ["shirt"],
+  collar: ["collar"],
+  lowerShirt: ["lowerShirt"],
+  leftZipper: ["leftZipper"],
+  rightZipper: ["rightZipper"],
+  // Arms: composites cover their fan-out
+  arms: [
+    "leftUpperArm",
+    "leftLowerArm",
+    "rightUpperArm",
+    "rightLowerArm",
+  ],
+  leftArm: ["leftUpperArm", "leftLowerArm"],
+  rightArm: ["rightUpperArm", "rightLowerArm"],
+  leftUpperArm: ["leftUpperArm"],
+  leftLowerArm: ["leftLowerArm"],
+  rightUpperArm: ["rightUpperArm"],
+  rightLowerArm: ["rightLowerArm"],
   hands: ["leftHand", "rightHand"],
   leftHand: ["leftHand"],
   rightHand: ["rightHand"],
-  legs: ["legs"],
-  leftLeg: ["legs"],
-  rightLeg: ["legs"],
-  crotch: ["legs"],
-  leftCrotch: ["legs"],
-  rightCrotch: ["legs"],
-  feet: ["feet"],
-  leftFoot: ["feet"],
-  rightFoot: ["feet"],
+  // Legs: "legs" lights crotch + thigh strips; specific leg/crotch parts each
+  // target their own slot. Crotch sub-zones are independent.
+  legs: ["leftCrotch", "crotch", "rightCrotch", "leftLeg", "rightLeg"],
+  leftLeg: ["leftLeg"],
+  rightLeg: ["rightLeg"],
+  crotch: ["crotch"],
+  leftCrotch: ["leftCrotch"],
+  rightCrotch: ["rightCrotch"],
+  feet: ["leftFoot", "rightFoot"],
+  leftFoot: ["leftFoot"],
+  rightFoot: ["rightFoot"],
 };
+
+// True if `a` and `b` are along the same coverage branch — i.e. one is a
+// composite that fully contains the other (e.g. arms ⊇ leftArm ⊇
+// leftUpperArm). Used by BodyPartsSelector to keep the picked set tidy:
+// when the user picks a specific part, any composite already covering it
+// is removed; conversely picking a composite strips any specific subset
+// already in the selection.
+export function partsAreRelated(a: BodyPartName, b: BodyPartName): boolean {
+  if (a === b) return true;
+  const aSlots = new Set(PART_TO_SLOTS[a]);
+  const bSlots = new Set(PART_TO_SLOTS[b]);
+  return isSubset(aSlots, bSlots) || isSubset(bSlots, aSlots);
+}
+
+function isSubset<T>(small: ReadonlySet<T>, big: ReadonlySet<T>): boolean {
+  for (const x of small) if (!big.has(x)) return false;
+  return true;
+}
 
 export interface DancerDisplay {
   dancerId: number;

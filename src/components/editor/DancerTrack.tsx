@@ -13,6 +13,8 @@ interface Props {
   // eventId → display name of a remote collaborator currently editing it.
   editorsByEventId?: Record<string, string>;
   onSelectEvent: (id: string) => void;
+  // Forwarded straight to the event block. Returns true if accepted.
+  onDragMove?: (eventId: string, deltaBeats: number) => boolean;
 }
 
 // One row of the timeline grid. The dancer label is now rendered separately
@@ -28,6 +30,7 @@ export function DancerTrack({
   currentBeat,
   editorsByEventId,
   onSelectEvent,
+  onDragMove,
 }: Props) {
   const totalPx = Math.max(totalBeats * pxPerBeat, 240);
   const isActive = (e: TimelineEvent) =>
@@ -64,6 +67,7 @@ export function DancerTrack({
             active={isActive(e)}
             editingByName={editorName}
             onClick={() => onSelectEvent(e.id)}
+            {...(onDragMove ? { onDragMove } : {})}
           />
         );
       })}
