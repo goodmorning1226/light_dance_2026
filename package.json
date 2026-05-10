@@ -14,7 +14,8 @@
     "test:integration": "npx -y tsx src/scripts/verifyIntegration.ts",
     "test:fullino": "npx -y tsx src/scripts/verifyFullIno.ts",
     "test:timeline": "npx -y tsx src/scripts/verifyTimeline.ts",
-    "test": "npm run test:io && npm run test:storage && npm run test:preview && npm run test:codegen && npm run test:integration && npm run test:fullino && npm run test:timeline"
+    "test:effect": "npx -y tsx src/scripts/verifyEffect.ts",
+    "test": "npm run test:io && npm run test:storage && npm run test:preview && npm run test:codegen && npm run test:integration && npm run test:fullino && npm run test:timeline && npm run test:effect"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",

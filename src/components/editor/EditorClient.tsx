@@ -110,16 +110,18 @@ export function EditorClient() {
   // (Play / Reset / direct ruler-click) so it doesn't lie about state.
   const [jumpedSectionId, setJumpedSectionId] = useState<string>("");
 
-  // Event modal — used for both personal (lockedDancerId set) and common
-  // (lockedDancerId undefined) creation flows. The playhead position and
-  // the dancer list are frozen at open time so the modal is stable while the
-  // user authors the event.
+  // Event modal — used for personal (lockedDancerId set), common
+  // (lockedDancerId undefined + mode="actions"), and effect
+  // (mode="effect") creation flows. The playhead position and the dancer
+  // list are frozen at open time so the modal is stable while the user
+  // authors the event.
   const [eventModal, setEventModal] = useState<{
     open: boolean;
     startBeat: number;
     defaultDancerIds: number[];
     lockedDancerId?: number;
-  }>({ open: false, startBeat: 0, defaultDancerIds: [] });
+    mode: "actions" | "effect";
+  }>({ open: false, startBeat: 0, defaultDancerIds: [], mode: "actions" });
 
   // Load + migrate on first mount.
   useEffect(() => {
@@ -553,6 +555,7 @@ export function EditorClient() {
       startBeat: snapBeat(currentBeat, dance.beatUnit),
       defaultDancerIds: [dancerId],
       lockedDancerId: dancerId,
+      mode: "actions",
     });
   };
 
@@ -569,6 +572,26 @@ export function EditorClient() {
       open: true,
       startBeat,
       defaultDancerIds: visible.length > 0 ? visible : dance.dancers.map((d) => d.id),
+      mode: "actions",
+    });
+  };
+
+  // Effect event entry point — opens the same modal in effect mode. The
+  // chosen dancers all become a single shared event whose action.dancers
+  // includes them; selecting / dragging / deleting any of its appearances
+  // on a dancer track moves the whole event because they're the same row.
+  const openEffectEventModal = () => {
+    if (!dance) return;
+    const startBeat = snapBeat(currentBeat, dance.beatUnit);
+    const visible =
+      viewMode === "all"
+        ? dance.dancers.map((d) => d.id)
+        : viewMode.dancerIds.filter((id) => dance.dancers.some((d) => d.id === id));
+    setEventModal({
+      open: true,
+      startBeat,
+      defaultDancerIds: visible.length > 0 ? visible : dance.dancers.map((d) => d.id),
+      mode: "effect",
     });
   };
 
@@ -824,6 +847,7 @@ export function EditorClient() {
             onDragMoveEvent={handleDragMoveEvent}
             onAddPersonalEvent={handleAddPersonalEvent}
             onOpenCommonEventModal={openCommonEventModal}
+            onOpenEffectEventModal={openEffectEventModal}
             onAddSection={addSection}
           />
 
@@ -833,6 +857,7 @@ export function EditorClient() {
             customAnimations={customAnimationsForUi}
             startBeat={eventModal.startBeat}
             defaultDancerIds={eventModal.defaultDancerIds}
+            mode={eventModal.mode}
             {...(eventModal.lockedDancerId !== undefined
               ? { lockedDancerId: eventModal.lockedDancerId }
               : {})}

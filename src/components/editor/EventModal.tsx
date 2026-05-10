@@ -5,44 +5,61 @@ import type {
   CustomAnimation,
   DanceAction,
   DanceProject,
+  EffectConfig,
   TimelineEvent,
 } from "@/types";
 import { ActionEditor } from "./ActionEditor";
-import { createEmptyAnimationAction, createEmptyStaticAction } from "@/lib/editor/factories";
+import { EffectEditor } from "./EffectEditor";
+import {
+  createEmptyAnimationAction,
+  createEmptyEffectAction,
+  createEmptyEffectConfig,
+  createEmptyStaticAction,
+} from "@/lib/editor/factories";
 import {
   findSectionForBeat,
   hasOverlapForDancer,
   snapBeat,
 } from "@/lib/editor/timelineHelpers";
 
+// The modal opens in one of three modes, decided by the caller in
+// EditorClient. All three flow through the same dialog skeleton (dancer
+// picker / startBeat / duration / label) but diverge in their authoring
+// surface and how Apply produces events.
+//
+//   PERSONAL (lockedDancerId set, mode="actions")
+//     - dancer is fixed, picker hidden
+//     - user authors a list of static / animation actions
+//     - Apply → 1 personal event for the locked dancer
+//
+//   COMMON (lockedDancerId undefined, mode="actions")
+//     - user picks N dancers + authors a list of actions
+//     - Apply → N personal events (one per dancer; each gets its own
+//               deep-cloned copy of the actions)
+//
+//   EFFECT (mode="effect", lockedDancerId undefined)
+//     - user picks N dancers + authors ONE effect config
+//     - Apply → 1 timeline event whose single action is type="effect" and
+//               action.dancers = the picked dancer ids. The same event
+//               appears on every chosen dancer's track in the editor;
+//               select / drag / delete acts on the single event so all
+//               occurrences move together — that's exactly what the user
+//               asked for ("放到timeline上同個effect的人的event要可以同時編輯、移動、刪除").
+export type EventModalMode = "actions" | "effect";
+
 interface Props {
   isOpen: boolean;
   dance: DanceProject;
   customAnimations: CustomAnimation[];
-  // Beat at which the new event(s) will start. Frozen at modal-open time so
-  // the picker is stable; the user can drag the playhead afterwards without
-  // the modal jumping.
   startBeat: number;
-  // Dancers pre-selected when the modal opens — typically the dancers
-  // visible in the current ViewMode, falling back to all of them. In personal
-  // mode this is forced to `[lockedDancerId]` regardless.
   defaultDancerIds: number[];
-  // When set, the modal runs in PERSONAL mode: dancer is fixed, the picker
-  // chips are hidden, and Apply produces exactly one personal event for this
-  // dancer. When undefined, the modal runs in COMMON mode: user picks
-  // multiple dancers and Apply fans out into one personal event per chosen
-  // dancer.
   lockedDancerId?: number;
+  // Defaults to "actions" for backward compat with personal/common callers.
+  mode?: EventModalMode;
   onApply: (events: TimelineEvent[]) => void;
   onCancel: () => void;
 }
 
-// Unified entry point for new events. Whether the user kicked off via the
-// per-dancer "+ Event" button (PERSONAL mode) or the top "+ Common Event"
-// button (COMMON mode), the dialog body is the same: pick duration / clear /
-// label and author the action list, then on Apply we produce one personal
-// event per included dancer (`lockedDancerId` set, action.dancers locked to
-// that one id). After Apply the data layer has no "common event" entity.
 export function EventModal({
   isOpen,
   dance,
@@ -50,11 +67,13 @@ export function EventModal({
   startBeat,
   defaultDancerIds,
   lockedDancerId,
+  mode = "actions",
   onApply,
   onCancel,
 }: Props) {
   const beatUnit = dance.beatUnit > 0 ? dance.beatUnit : 0.5;
   const isPersonal = lockedDancerId !== undefined;
+  const isEffectMode = mode === "effect";
   const lockedDancer = isPersonal
     ? dance.dancers.find((d) => d.id === lockedDancerId)
     : undefined;
@@ -66,9 +85,13 @@ export function EventModal({
   const [clearBefore, setClearBefore] = useState<boolean>(false);
   const [label, setLabel] = useState<string>("");
   const [actions, setActions] = useState<DanceAction[]>(() => [createEmptyStaticAction()]);
+  const [effectAction, setEffectAction] = useState<DanceAction>(() =>
+    createEmptyEffectAction("dancer-wave"),
+  );
   const [error, setError] = useState<string | null>(null);
 
-  // Reset state on every fresh open so an aborted edit doesn't leak.
+  // Reset state on every fresh open so an aborted edit doesn't leak between
+  // sessions of the modal.
   useEffect(() => {
     if (!isOpen) return;
     if (isPersonal) {
@@ -82,6 +105,7 @@ export function EventModal({
     setClearBefore(false);
     setLabel("");
     setActions([createEmptyStaticAction()]);
+    setEffectAction(createEmptyEffectAction("dancer-wave"));
     setError(null);
   }, [isOpen, defaultDancerIds, dance.dancers, beatUnit, isPersonal, lockedDancerId]);
 
@@ -103,13 +127,20 @@ export function EventModal({
   const deleteAction = (idx: number) =>
     setActions((prev) => prev.filter((_, i) => i !== idx));
 
+  const setEffectConfig = (next: EffectConfig) =>
+    setEffectAction((prev) => ({ ...prev, effect: next }));
+
   const handleApply = () => {
     if (dancerIds.length === 0) {
       setError("Pick at least one dancer.");
       return;
     }
-    if (actions.length === 0) {
+    if (!isEffectMode && actions.length === 0) {
       setError("Add at least one action.");
+      return;
+    }
+    if (isEffectMode && !effectAction.effect) {
+      setError("Configure the effect first.");
       return;
     }
     const dur = Math.max(beatUnit, snapBeat(duration, beatUnit));
@@ -117,8 +148,8 @@ export function EventModal({
     const sectionId = findSectionForBeat(dance, sb);
     const existing = dance.timelineEvents ?? [];
 
-    // Overlap guard uses the user-chosen duration (not a default), so making
-    // the event shorter to fit a tight gap is supported.
+    // Overlap guard uses the user-chosen duration so a tighter slot can be
+    // hit by shortening the event.
     const conflicts: number[] = [];
     for (const dId of dancerIds) {
       if (hasOverlapForDancer(existing, dId, sb, dur)) conflicts.push(dId);
@@ -130,35 +161,72 @@ export function EventModal({
       return;
     }
 
-    const generated: TimelineEvent[] = dancerIds.map((dId, i) => {
-      const cloned: DanceAction[] = actions.map((a) => ({
-        ...JSON.parse(JSON.stringify(a)),
-        dancers: [dId],
-      }));
+    let generated: TimelineEvent[];
+    if (isEffectMode) {
+      // ONE event holding ONE effect action that addresses every chosen
+      // dancer. Selecting / dragging / deleting it on any of its tracks
+      // moves the whole effect because they're all the same row.
+      const fxAction: DanceAction = {
+        type: "effect",
+        dancers: [...dancerIds],
+        color: { ...effectAction.color },
+        // The picked dancers always become the candidate pool for the effect.
+        // The effect's own customOrder / dancerGroups still reference dancer
+        // ids, which the user authored in the EffectEditor below.
+        effect: effectAction.effect ?? createEmptyEffectConfig("dancer-wave"),
+        ...(effectAction.parts && effectAction.parts.length > 0
+          ? { parts: [...effectAction.parts] }
+          : {}),
+      };
       const evt: TimelineEvent = {
-        id: `evt-${Date.now().toString(36)}-${i}-${Math.random().toString(36).slice(2, 5)}`,
+        id: `evt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
         sectionId,
         startBeat: sb,
         durationBeats: dur,
         clearBefore,
-        actions: cloned,
-        lockedDancerId: dId,
+        actions: [fxAction],
       };
       if (label.trim().length > 0) evt.label = label.trim();
-      return evt;
-    });
+      generated = [evt];
+    } else {
+      generated = dancerIds.map((dId, i) => {
+        const cloned: DanceAction[] = actions.map((a) => ({
+          ...JSON.parse(JSON.stringify(a)),
+          dancers: [dId],
+        }));
+        const evt: TimelineEvent = {
+          id: `evt-${Date.now().toString(36)}-${i}-${Math.random().toString(36).slice(2, 5)}`,
+          sectionId,
+          startBeat: sb,
+          durationBeats: dur,
+          clearBefore,
+          actions: cloned,
+          lockedDancerId: dId,
+        };
+        if (label.trim().length > 0) evt.label = label.trim();
+        return evt;
+      });
+    }
     onApply(generated);
   };
 
-  const headerTitle = isPersonal ? "Add personal event" : "Add common event";
-  const headerSubtitle = isPersonal
-    ? lockedDancer
-      ? `for #${lockedDancerId} · ${lockedDancer.name}`
-      : `for dancer #${lockedDancerId}`
-    : `→ splits into ${dancerIds.length || "?"} personal event${dancerIds.length === 1 ? "" : "s"} on Apply`;
-  const applyLabel = isPersonal
-    ? "Create event"
-    : `Apply (${dancerIds.length} event${dancerIds.length === 1 ? "" : "s"})`;
+  const headerTitle = isEffectMode
+    ? "Add effect event"
+    : isPersonal
+      ? "Add personal event"
+      : "Add common event";
+  const headerSubtitle = isEffectMode
+    ? `→ one shared effect event across ${dancerIds.length || "?"} dancer${dancerIds.length === 1 ? "" : "s"}`
+    : isPersonal
+      ? lockedDancer
+        ? `for #${lockedDancerId} · ${lockedDancer.name}`
+        : `for dancer #${lockedDancerId}`
+      : `→ splits into ${dancerIds.length || "?"} personal event${dancerIds.length === 1 ? "" : "s"} on Apply`;
+  const applyLabel = isEffectMode
+    ? "Create effect event"
+    : isPersonal
+      ? "Create event"
+      : `Apply (${dancerIds.length} event${dancerIds.length === 1 ? "" : "s"})`;
 
   return (
     <div
@@ -284,9 +352,11 @@ export function EventModal({
               <input
                 value={label}
                 placeholder={
-                  isPersonal
-                    ? "(shown on the timeline block)"
-                    : "(applied to every generated event)"
+                  isEffectMode
+                    ? "(shown on the timeline block — appears on every dancer's row)"
+                    : isPersonal
+                      ? "(shown on the timeline block)"
+                      : "(applied to every generated event)"
                 }
                 onChange={(e) => setLabel(e.target.value)}
                 style={{ flex: 1 }}
@@ -294,28 +364,46 @@ export function EventModal({
             </label>
           </div>
 
-          <div className="col" style={{ gap: 6 }}>
-            <span className="group-label">
-              {isPersonal
-                ? "Actions"
-                : "Actions (each selected dancer gets their own copy)"}
-            </span>
-            {actions.map((a, i) => (
-              <ActionEditor
-                key={i}
-                action={a}
+          {isEffectMode ? (
+            <div className="col" style={{ gap: 8 }}>
+              <span className="group-label">Effect (one shared event for all picked dancers)</span>
+              <EffectEditor
+                effect={effectAction.effect ?? createEmptyEffectConfig("dancer-wave")}
                 dancers={dance.dancers}
-                customAnimations={customAnimations}
-                onChange={(next) => updateAction(i, next)}
-                onDelete={() => deleteAction(i)}
-                hideDancers
+                onChange={setEffectConfig}
               />
-            ))}
-            <div className="row" style={{ gap: 6 }}>
-              <button onClick={() => addAction("static")}>+ static action</button>
-              <button onClick={() => addAction("animation")}>+ animation action</button>
+              <div className="row" style={{ gap: 12, flexWrap: "wrap" }}>
+                <span className="muted" style={{ fontSize: 11 }}>
+                  Body parts + color come from the action card; for effect mode they
+                  default to body / yellow. Edit them in the action card after Apply
+                  if you want something else.
+                </span>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="col" style={{ gap: 6 }}>
+              <span className="group-label">
+                {isPersonal
+                  ? "Actions"
+                  : "Actions (each selected dancer gets their own copy)"}
+              </span>
+              {actions.map((a, i) => (
+                <ActionEditor
+                  key={i}
+                  action={a}
+                  dancers={dance.dancers}
+                  customAnimations={customAnimations}
+                  onChange={(next) => updateAction(i, next)}
+                  onDelete={() => deleteAction(i)}
+                  hideDancers
+                />
+              ))}
+              <div className="row" style={{ gap: 6 }}>
+                <button onClick={() => addAction("static")}>+ static action</button>
+                <button onClick={() => addAction("animation")}>+ animation action</button>
+              </div>
+            </div>
+          )}
 
           {error && <div className="error" style={{ padding: 8 }}>{error}</div>}
         </div>
@@ -333,7 +421,10 @@ export function EventModal({
           <button
             className="primary"
             onClick={handleApply}
-            disabled={dancerIds.length === 0 || actions.length === 0}
+            disabled={
+              dancerIds.length === 0 ||
+              (isEffectMode ? !effectAction.effect : actions.length === 0)
+            }
           >
             {applyLabel}
           </button>

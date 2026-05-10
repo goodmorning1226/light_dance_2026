@@ -88,6 +88,66 @@ export function collectTimelineWarnings(dance: DanceProject): TimelineWarning[] 
           message: `Event "${e.label ?? e.id}" animation action #${i + 1} has no part (Rainbow excepted).`,
         });
       }
+      if (a.type === "effect") {
+        const effect = a.effect;
+        const partsList = a.parts ?? (a.part ? [a.part] : []);
+        if (!effect) {
+          warnings.push({
+            eventId: e.id,
+            severity: "error",
+            message: `Event "${e.label ?? e.id}" effect action #${i + 1} is missing the effect config.`,
+          });
+        } else {
+          if (partsList.length === 0) {
+            warnings.push({
+              eventId: e.id,
+              severity: "warn",
+              message: `Event "${e.label ?? e.id}" effect action #${i + 1} has no body parts.`,
+            });
+          }
+          if (effect.effectType === "group-sequence") {
+            const groups = (effect.dancerGroups ?? []).filter((g) => g.length > 0);
+            if (groups.length === 0) {
+              warnings.push({
+                eventId: e.id,
+                severity: "error",
+                message: `Event "${e.label ?? e.id}" group-sequence effect has no non-empty groups.`,
+              });
+            }
+          }
+          if (
+            (effect.effectType === "dancer-wave" ||
+              effect.effectType === "fast-part-chase") &&
+            a.dancers.length === 0
+          ) {
+            warnings.push({
+              eventId: e.id,
+              severity: "warn",
+              message: `Event "${e.label ?? e.id}" ${effect.effectType} effect needs dancers to wave through.`,
+            });
+          }
+          if (
+            effect.orderMode === "custom" &&
+            (!effect.customOrder || effect.customOrder.length === 0)
+          ) {
+            warnings.push({
+              eventId: e.id,
+              severity: "warn",
+              message: `Event "${e.label ?? e.id}" effect has orderMode="custom" but customOrder is empty.`,
+            });
+          }
+          if (
+            effect.effectType === "strobe" &&
+            (effect.blinkCount === undefined || effect.blinkCount <= 0)
+          ) {
+            warnings.push({
+              eventId: e.id,
+              severity: "warn",
+              message: `Event "${e.label ?? e.id}" strobe effect has invalid blinkCount; will default to 4.`,
+            });
+          }
+        }
+      }
     }
   }
 

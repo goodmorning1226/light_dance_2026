@@ -7,10 +7,13 @@ import {
   type CustomAnimation,
   type DanceAction,
   type Dancer,
+  type EffectConfig,
 } from "@/types";
+import { createEmptyEffectConfig } from "@/lib/editor/factories";
 import { ColorInput } from "./ColorInput";
 import { DancersCheckboxes } from "./DancersCheckboxes";
 import { BodyPartsSelector } from "./BodyPartsSelector";
+import { EffectEditor } from "./EffectEditor";
 
 interface Props {
   action: DanceAction;
@@ -58,9 +61,9 @@ export function ActionEditor({
     onChange({ ...action, animationId: id });
   };
 
-  // Convert between static and animation. Drops fields incompatible with the
+  // Convert between action types. Drops fields incompatible with the
   // target type and seeds defaults so the action is immediately valid.
-  const setActionType = (next: "static" | "animation") => {
+  const setActionType = (next: "static" | "animation" | "effect") => {
     if (next === action.type) return;
     if (next === "static") {
       const converted: DanceAction = {
@@ -70,7 +73,7 @@ export function ActionEditor({
         parts: action.parts ?? (action.part ? [action.part] : ["whole"]),
       };
       onChange(converted);
-    } else {
+    } else if (next === "animation") {
       const converted: DanceAction = {
         type: "animation",
         dancers: action.dancers,
@@ -79,23 +82,41 @@ export function ActionEditor({
         animationId: action.animationId ?? "ShowColor",
       };
       onChange(converted);
+    } else {
+      const converted: DanceAction = {
+        type: "effect",
+        dancers: action.dancers,
+        color: action.color,
+        parts: action.parts ?? (action.part ? [action.part] : ["body"]),
+        effect: action.effect ?? createEmptyEffectConfig("dancer-wave"),
+      };
+      onChange(converted);
     }
   };
 
+  const setEffect = (next: EffectConfig) => onChange({ ...action, effect: next });
+
   const isAnimation = action.type === "animation";
+  const isEffect = action.type === "effect";
   const animId = action.animationId ?? "ShowColor";
   const showPartSelector =
-    !isAnimation || ANIMATIONS_NEEDING_PART.has(animId) || isCustom(animId, customAnimations);
+    isEffect ||
+    !isAnimation ||
+    ANIMATIONS_NEEDING_PART.has(animId) ||
+    isCustom(animId, customAnimations);
+
+  // Card backgrounds telegraph the action kind at a glance:
+  //   static     → cool blue   (held color)
+  //   animation  → warm amber  (time-varying)
+  //   effect     → light violet (composite — many internal sub-steps)
+  const cardBg = isEffect ? "#ede9fe" : isAnimation ? "#fef3c7" : "#dbeafe";
 
   return (
-    <div
-      className="card"
-      style={{ background: isAnimation ? "#fef3c7" : "#dbeafe", borderColor: "transparent" }}
-    >
+    <div className="card" style={{ background: cardBg, borderColor: "transparent" }}>
       <div className="row" style={{ marginBottom: 6, gap: 6 }}>
         <select
           value={action.type}
-          onChange={(e) => setActionType(e.target.value as "static" | "animation")}
+          onChange={(e) => setActionType(e.target.value as "static" | "animation" | "effect")}
           title="Switch action type"
           style={{
             fontSize: 12,
@@ -110,6 +131,7 @@ export function ActionEditor({
         >
           <option value="static">static</option>
           <option value="animation">animation</option>
+          <option value="effect">effect</option>
         </select>
         <span className="spacer" />
         <button className="ghost danger" onClick={onDelete} title="Delete action">
@@ -156,6 +178,16 @@ export function ActionEditor({
         <Field label="Color">
           <ColorInput value={action.color} onChange={setColor} />
         </Field>
+
+        {isEffect && action.effect && (
+          <Field label="Effect">
+            <EffectEditor
+              effect={action.effect}
+              dancers={dancers}
+              onChange={setEffect}
+            />
+          </Field>
+        )}
       </div>
     </div>
   );

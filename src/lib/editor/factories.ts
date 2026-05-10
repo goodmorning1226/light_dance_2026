@@ -1,4 +1,12 @@
-import type { DanceAction, Dancer, DanceProject, DanceSection, DanceStep } from "@/types";
+import type {
+  DanceAction,
+  Dancer,
+  DanceProject,
+  DanceSection,
+  DanceStep,
+  EffectConfig,
+  EffectType,
+} from "@/types";
 import { createId } from "@/lib/storage";
 
 export function createEmptyDance(): DanceProject {
@@ -67,5 +75,45 @@ export function createEmptyAnimationAction(): DanceAction {
     part: "whole",
     color: { r: 255, g: 255, b: 255 },
     animationId: "ShowColor",
+  };
+}
+
+// Sensible per-effect-type defaults so a freshly-added effect is immediately
+// playable in the preview (no "empty effect, nothing happens" gotcha).
+export function createEmptyEffectConfig(effectType: EffectType): EffectConfig {
+  switch (effectType) {
+    case "global-switch":
+      return { effectType, clearBeforeStep: true };
+    case "dancer-wave":
+      return {
+        effectType,
+        orderMode: "in-order",
+        mode: "one-by-one",
+        clearBeforeStep: true,
+      };
+    case "group-sequence":
+      return { effectType, dancerGroups: [], clearBeforeStep: true };
+    case "fast-part-chase":
+      return { effectType, orderMode: "in-order", clearBeforeStep: true };
+    case "strobe":
+      return {
+        effectType,
+        blinkCount: 4,
+        onRatio: 0.5,
+        offRatio: 0.5,
+        clearBeforeStep: false,
+      };
+  }
+}
+
+export function createEmptyEffectAction(
+  effectType: EffectType = "dancer-wave",
+): DanceAction {
+  return {
+    type: "effect",
+    dancers: [],
+    parts: ["body"],
+    color: { r: 255, g: 230, b: 25 },
+    effect: createEmptyEffectConfig(effectType),
   };
 }

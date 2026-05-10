@@ -4,6 +4,7 @@ import type {
   DanceStep,
   TimelineEvent,
 } from "@/types";
+import { expandEventToVirtualEvents } from "@/lib/editor/effectModel";
 
 // Converts the dance's `timelineEvents` for one section into a sequence of
 // `DanceStep`s ready for the existing step-level code emitter:
@@ -31,8 +32,14 @@ export function timelineEventsToEmissionSteps(
   }
 
   const sectionStartBeat = section.startBeat ?? 0;
+  // Effect actions are expanded BEFORE grouping, so an event with an
+  // effect becomes N back-to-back virtual events covering the same beat
+  // range. The downstream grouping then emits one DanceStep per virtual
+  // event automatically — preview and codegen end up exercising the same
+  // expansion routine in `effectModel.ts`.
   const sectionEvents = events
     .filter((e) => e.sectionId === section.id)
+    .flatMap(expandEventToVirtualEvents)
     .slice()
     .sort((a, b) => a.startBeat - b.startBeat);
   if (sectionEvents.length === 0) return [];

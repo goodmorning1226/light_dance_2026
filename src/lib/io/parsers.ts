@@ -10,6 +10,10 @@ import {
   type DanceProject,
   type DanceSection,
   type DanceStep,
+  type EffectConfig,
+  type EffectOrderMode,
+  type EffectType,
+  type EffectWaveMode,
   type ProgramArrangement,
   type ProgramItem,
   isBodyPartName,
@@ -55,10 +59,113 @@ function asAnimationId(
   );
 }
 
-function asActionType(v: unknown, path: string): "static" | "animation" {
+function asActionType(v: unknown, path: string): "static" | "animation" | "effect" {
   const s = asString(v, path);
-  if (s === "static" || s === "animation") return s;
-  throw new ImportError(path, `Expected "static" or "animation", got "${s}"`);
+  if (s === "static" || s === "animation" || s === "effect") return s;
+  throw new ImportError(path, `Expected "static", "animation", or "effect", got "${s}"`);
+}
+
+const VALID_EFFECT_TYPES: EffectType[] = [
+  "global-switch",
+  "dancer-wave",
+  "group-sequence",
+  "fast-part-chase",
+  "strobe",
+];
+const VALID_ORDER_MODES: EffectOrderMode[] = ["in-order", "reverse", "custom"];
+const VALID_WAVE_MODES: EffectWaveMode[] = ["one-by-one", "accumulate"];
+
+function parseEffectConfig(raw: unknown, path: string): EffectConfig {
+  const obj = asObject(raw, path);
+  const effectType = requireField(obj, "effectType", path, (v, p) => {
+    const s = asString(v, p);
+    if (!(VALID_EFFECT_TYPES as string[]).includes(s)) {
+      throw new ImportError(
+        p,
+        `Unknown effectType "${s}" (expected one of ${VALID_EFFECT_TYPES.join(", ")})`,
+      );
+    }
+    return s as EffectType;
+  });
+  const out: EffectConfig = { effectType };
+
+  if (obj.orderMode !== undefined) {
+    const s = asString(obj.orderMode, joinPath(path, "orderMode"));
+    if (!(VALID_ORDER_MODES as string[]).includes(s)) {
+      throw new ImportError(
+        joinPath(path, "orderMode"),
+        `Unknown orderMode "${s}" (expected one of ${VALID_ORDER_MODES.join(", ")})`,
+      );
+    }
+    out.orderMode = s as EffectOrderMode;
+  }
+  if (obj.customOrder !== undefined) {
+    const cpath = joinPath(path, "customOrder");
+    const arr = asArray(obj.customOrder, cpath);
+    out.customOrder = arr.map((d, i) => asNumber(d, `${cpath}[${i}]`));
+  }
+  if (obj.mode !== undefined) {
+    const s = asString(obj.mode, joinPath(path, "mode"));
+    if (!(VALID_WAVE_MODES as string[]).includes(s)) {
+      throw new ImportError(
+        joinPath(path, "mode"),
+        `Unknown effect mode "${s}" (expected one of ${VALID_WAVE_MODES.join(", ")})`,
+      );
+    }
+    out.mode = s as EffectWaveMode;
+  }
+  if (obj.dancerGroups !== undefined) {
+    const gpath = joinPath(path, "dancerGroups");
+    const groups = asArray(obj.dancerGroups, gpath);
+    out.dancerGroups = groups.map((g, i) => {
+      const gp = `${gpath}[${i}]`;
+      const inner = asArray(g, gp);
+      return inner.map((d, j) => asNumber(d, `${gp}[${j}]`));
+    });
+  }
+  if (obj.colors !== undefined) {
+    const cpath = joinPath(path, "colors");
+    const arr = asArray(obj.colors, cpath);
+    out.colors = arr.map((c, i) => parseColor(c, `${cpath}[${i}]`));
+  }
+  if (obj.blinkCount !== undefined) {
+    const n = asNumber(obj.blinkCount, joinPath(path, "blinkCount"));
+    if (n <= 0) {
+      throw new ImportError(joinPath(path, "blinkCount"), `blinkCount must be > 0 (got ${n})`);
+    }
+    out.blinkCount = n;
+  }
+  if (obj.onRatio !== undefined) {
+    out.onRatio = asNumber(obj.onRatio, joinPath(path, "onRatio"));
+  }
+  if (obj.offRatio !== undefined) {
+    out.offRatio = asNumber(obj.offRatio, joinPath(path, "offRatio"));
+  }
+  if (obj.clearBeforeStep !== undefined) {
+    out.clearBeforeStep = asBoolean(obj.clearBeforeStep, joinPath(path, "clearBeforeStep"));
+  }
+
+  // Per-effect-type required-field validation. Catches "I made a wave with
+  // no dancers" before it tries to render and produces an empty preview.
+  if (effectType === "group-sequence") {
+    if (!out.dancerGroups || out.dancerGroups.length === 0) {
+      throw new ImportError(
+        joinPath(path, "dancerGroups"),
+        `group-sequence effect requires non-empty dancerGroups`,
+      );
+    }
+  }
+  if (effectType === "strobe" && out.blinkCount === undefined) {
+    // Soft default — not an error; expansion will use 4 if missing.
+  }
+  if (out.orderMode === "custom" && (!out.customOrder || out.customOrder.length === 0)) {
+    throw new ImportError(
+      joinPath(path, "customOrder"),
+      `orderMode="custom" requires non-empty customOrder`,
+    );
+  }
+
+  return out;
 }
 
 function parseColor(raw: unknown, path: string): ColorRGB {
@@ -137,6 +244,28 @@ function parseDanceAction(
         `Multi / Sequential animation requires non-empty subAnimations.`,
       );
     }
+  }
+
+  if (obj.effect !== undefined) {
+    if (type !== "effect") {
+      throw new ImportError(
+        joinPath(path, "effect"),
+        `effect config is only valid on type="effect" (got "${type}")`,
+      );
+    }
+    action.effect = parseEffectConfig(obj.effect, joinPath(path, "effect"));
+  }
+  if (type === "effect" && !action.effect) {
+    throw new ImportError(
+      joinPath(path, "effect"),
+      `type="effect" requires an "effect" config object`,
+    );
+  }
+  if (type === "effect" && action.subAnimations) {
+    throw new ImportError(
+      joinPath(path, "subAnimations"),
+      `effect action cannot have subAnimations`,
+    );
   }
 
   return action;

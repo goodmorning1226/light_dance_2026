@@ -25,6 +25,10 @@ interface Props {
   onAddPersonalEvent: (dancerId: number) => void;
   // Top "+ Common Event" button — opens the modal in the parent.
   onOpenCommonEventModal: () => void;
+  // Top "+ Effect" button — opens the same modal in effect mode. Produces
+  // ONE shared event spanning every chosen dancer (vs. common event which
+  // fans out into N personal events).
+  onOpenEffectEventModal: () => void;
   // Section creation — parent inserts at the current playhead position.
   onAddSection: () => void;
 }
@@ -42,6 +46,7 @@ export function TimelineEditor({
   onDragMoveEvent,
   onAddPersonalEvent,
   onOpenCommonEventModal,
+  onOpenEffectEventModal,
   onAddSection,
 }: Props) {
   const totalBeats = Math.max(8, totalBeatsOf(dance) + 4);
@@ -95,6 +100,17 @@ export function TimelineEditor({
           title="Pick dancers + author actions in a modal; on Apply each dancer gets their own personal event"
         >
           + Common Event
+        </button>
+        <button
+          onClick={onOpenEffectEventModal}
+          title="Pick dancers + configure a single high-level effect; on Apply you get ONE shared event that spans every chosen dancer's track (drag/edit/delete moves them together)"
+          style={{
+            background: "#ede9fe",
+            borderColor: "#a78bfa",
+            color: "#5b21b6",
+          }}
+        >
+          + Effect
         </button>
       </div>
 
