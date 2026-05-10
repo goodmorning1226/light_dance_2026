@@ -8,13 +8,21 @@ interface Props {
   errorMessage?: string | null;
 }
 
-const COLOR: Record<CollaborationStatus, string> = {
-  local: "#94a3b8",
-  connecting: "#fbbf24",
-  connected: "#10b981",
-  saving: "#3b82f6",
-  saved: "#10b981",
-  error: "#dc2626",
+interface StatusStyle {
+  dot: string;
+  bg: string;
+  fg: string;
+  border: string;
+  pulse: boolean;
+}
+
+const STATUS: Record<CollaborationStatus, StatusStyle> = {
+  local:      { dot: "#94a3b8", bg: "#f1f5f9", fg: "#475569", border: "#e2e8f0", pulse: false },
+  connecting: { dot: "#f59e0b", bg: "#fffbeb", fg: "#92400e", border: "#fde68a", pulse: true },
+  connected:  { dot: "#10b981", bg: "#ecfdf5", fg: "#065f46", border: "#a7f3d0", pulse: false },
+  saving:     { dot: "#4f46e5", bg: "#eef2ff", fg: "#3730a3", border: "#c7d2fe", pulse: true },
+  saved:      { dot: "#10b981", bg: "#ecfdf5", fg: "#065f46", border: "#a7f3d0", pulse: false },
+  error:      { dot: "#dc2626", bg: "#fef2f2", fg: "#991b1b", border: "#fecaca", pulse: false },
 };
 
 const LABEL: Record<CollaborationStatus, string> = {
@@ -27,37 +35,49 @@ const LABEL: Record<CollaborationStatus, string> = {
 };
 
 export function SyncStatusBadge({ status, lastSyncedAt, errorMessage }: Props) {
-  const dot = COLOR[status];
-  const label = LABEL[status];
+  const s = STATUS[status];
   const tooltip = errorMessage
     ? `Error: ${errorMessage}`
     : lastSyncedAt
       ? `Last synced ${lastSyncedAt.toLocaleTimeString()}`
       : "";
   return (
-    <span
-      title={tooltip}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        fontSize: 12,
-        padding: "2px 8px",
-        borderRadius: 999,
-        background: status === "error" ? "#fef2f2" : "#f1f5f9",
-        color: status === "error" ? "#991b1b" : "#1e293b",
-      }}
-    >
+    <>
+      <style>{`
+        @keyframes ld26-status-pulse {
+          0%, 100% { box-shadow: 0 0 0 0 currentColor; opacity: 1; }
+          50%      { box-shadow: 0 0 0 4px transparent; opacity: 0.55; }
+        }
+      `}</style>
       <span
+        title={tooltip}
         style={{
-          width: 8,
-          height: 8,
-          borderRadius: "50%",
-          background: dot,
-          display: "inline-block",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          fontSize: 12,
+          fontWeight: 600,
+          padding: "3px 10px",
+          borderRadius: 999,
+          background: s.bg,
+          color: s.fg,
+          border: `1px solid ${s.border}`,
+          letterSpacing: 0.1,
         }}
-      />
-      {label}
-    </span>
+      >
+        <span
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: "50%",
+            background: s.dot,
+            display: "inline-block",
+            color: s.dot,
+            animation: s.pulse ? "ld26-status-pulse 1.4s ease-in-out infinite" : undefined,
+          }}
+        />
+        {LABEL[status]}
+      </span>
+    </>
   );
 }

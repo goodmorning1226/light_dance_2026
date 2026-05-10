@@ -50,12 +50,14 @@ export function CloudModeBar() {
     <>
       <div
         style={{
-          padding: "6px 16px",
-          background: "white",
-          borderBottom: "1px solid #e2e8f0",
+          padding: "8px 20px",
+          background: "rgba(255,255,255,0.78)",
+          backdropFilter: "saturate(180%) blur(10px)",
+          WebkitBackdropFilter: "saturate(180%) blur(10px)",
+          borderBottom: "1px solid var(--color-border)",
           display: "flex",
           alignItems: "center",
-          gap: 10,
+          gap: 12,
           flexWrap: "wrap",
           fontSize: 12,
         }}
@@ -68,50 +70,145 @@ export function CloudModeBar() {
 
         {state ? (
           <>
-            <span style={{ fontWeight: 600 }}>{state.program.name}</span>
+            <span
+              style={{
+                fontWeight: 600,
+                fontSize: 13,
+                color: "var(--color-text)",
+              }}
+            >
+              {state.program.name}
+            </span>
+
             <button
               onClick={() => setMembersOpen(true)}
               title="Show members panel"
+              className="ghost"
               style={{
-                padding: "1px 6px",
+                padding: "3px 10px",
                 fontSize: 11,
+                fontWeight: 500,
                 borderRadius: 999,
-                background: "#f1f5f9",
-                border: "1px solid #e2e8f0",
-                cursor: "pointer",
+                background: "var(--color-surface-2)",
+                border: "1px solid var(--color-border)",
+                color: "var(--color-text-muted)",
+                gap: 6,
               }}
             >
+              <span aria-hidden style={{ fontSize: 10 }}>👥</span>
               {state.members.length} member{state.members.length === 1 ? "" : "s"}
-              {onlineCount > 0 ? ` · ${onlineCount} online` : ""}
+              {onlineCount > 0 && (
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                    paddingLeft: 6,
+                    marginLeft: 2,
+                    borderLeft: "1px solid var(--color-border-strong)",
+                    color: "var(--color-success)",
+                    fontWeight: 600,
+                  }}
+                >
+                  <span
+                    style={{
+                      display: "inline-block",
+                      width: 6,
+                      height: 6,
+                      borderRadius: "50%",
+                      background: "var(--color-success)",
+                      boxShadow: "0 0 0 2px rgba(16,185,129,0.2)",
+                    }}
+                  />
+                  {onlineCount} online
+                </span>
+              )}
             </button>
-            <span className="muted">· {state.myDisplayName} ({state.myRole})</span>
+
+            <span
+              style={{
+                color: "var(--color-text-muted)",
+                fontSize: 12,
+              }}
+            >
+              <span style={{ fontWeight: 500, color: "var(--color-text)" }}>
+                {state.myDisplayName}
+              </span>
+              <span
+                style={{
+                  marginLeft: 6,
+                  padding: "1px 7px",
+                  borderRadius: 999,
+                  background: "var(--color-brand-soft)",
+                  color: "var(--color-brand-active)",
+                  fontWeight: 600,
+                  fontSize: 10,
+                  textTransform: "uppercase",
+                  letterSpacing: 0.5,
+                }}
+              >
+                {state.myRole}
+              </span>
+            </span>
 
             <span style={{ flex: 1 }} />
 
-            <span className="muted">share code</span>
+            <span
+              style={{
+                color: "var(--color-text-muted)",
+                fontSize: 11,
+                textTransform: "uppercase",
+                letterSpacing: 0.6,
+                fontWeight: 600,
+              }}
+            >
+              share code
+            </span>
             <code
               onClick={handleCopyShareCode}
               title="Click to copy"
               style={{
-                fontFamily: "monospace",
+                fontFamily: "var(--font-mono)",
                 fontWeight: 700,
+                fontSize: 12,
                 letterSpacing: 2,
-                padding: "2px 8px",
-                background: "#f1f5f9",
-                borderRadius: 4,
+                padding: "4px 12px",
+                background: "linear-gradient(135deg, #eef2ff 0%, #f5f3ff 100%)",
+                border: "1px solid var(--color-brand-soft-border)",
+                color: "var(--color-brand-active)",
+                borderRadius: 8,
                 cursor: "pointer",
                 userSelect: "all",
+                transition: "transform var(--transition-fast), box-shadow var(--transition-fast)",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
               }}
+              onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-1px)")}
+              onMouseLeave={(e) => (e.currentTarget.style.transform = "")}
             >
               {state.program.shareCode}
+              <span aria-hidden style={{ fontSize: 11, opacity: 0.7 }}>
+                {copied ? "✓" : "⧉"}
+              </span>
             </code>
-            {copied && <span className="muted">copied</span>}
+            {copied && (
+              <span
+                style={{
+                  fontSize: 11,
+                  color: "var(--color-success)",
+                  fontWeight: 600,
+                }}
+              >
+                copied
+              </span>
+            )}
 
             <button onClick={pushLocalToCloud} title="Push every local dance to the cloud now">
-              Push local
+              ↥ Push local
             </button>
             <button onClick={reloadProgram} title="Pull the latest from the cloud">
-              Reload
+              ↻ Reload
             </button>
             <button className="danger ghost" onClick={leaveProgram}>
               Leave
@@ -119,7 +216,7 @@ export function CloudModeBar() {
           </>
         ) : (
           <>
-            <span className="muted">
+            <span style={{ color: "var(--color-text-muted)" }}>
               Local Mode — your edits stay in this browser only.
             </span>
             <span style={{ flex: 1 }} />
@@ -131,7 +228,12 @@ export function CloudModeBar() {
                 </button>
               </>
             ) : (
-              <span className="muted" style={{ fontSize: 11 }}>
+              <span
+                style={{
+                  fontSize: 11,
+                  color: "var(--color-text-faint)",
+                }}
+              >
                 (Cloud not configured — set NEXT_PUBLIC_SUPABASE_URL/_ANON_KEY to enable)
               </span>
             )}
