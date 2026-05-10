@@ -25,14 +25,16 @@ import {
 import { migrateStepsToTimelineEvents } from "@/lib/editor/migration";
 import {
   collectTimelineWarnings,
+  snapBeat,
   totalBeatsOf,
 } from "@/lib/editor/timelineHelpers";
 import { DanceMetaPanel } from "./DanceMetaPanel";
 import { PreviewPanel } from "./PreviewPanel";
 import { TimelineEditor } from "./TimelineEditor";
-import { TimelineEventEditor, buildEmptyEvent } from "./TimelineEventEditor";
+import { TimelineEventEditor } from "./TimelineEventEditor";
 import { TimelineWarningsPanel } from "./TimelineWarningsPanel";
 import { ViewModeTabs, type ViewMode } from "./ViewModeTabs";
+import { EventModal } from "./EventModal";
 
 type Notice = { kind: "info" | "error"; text: string } | null;
 
@@ -52,9 +54,21 @@ function loadEditorUiState(): EditorUiState {
   try {
     const raw = window.localStorage.getItem(EDITOR_UI_KEY);
     if (!raw) return { viewMode: "all", showGhostEvents: false, selectedEventId: null };
-    const parsed = JSON.parse(raw) as Partial<EditorUiState>;
+    const parsed = JSON.parse(raw) as Partial<EditorUiState> & {
+      viewMode?: ViewMode | { dancerId: number };
+    };
+    // Migrate legacy single-dancer viewMode shape `{ dancerId: N }` into the
+    // current multi-select shape `{ dancerIds: [N] }`.
+    let viewMode: ViewMode = "all";
+    const v = parsed.viewMode;
+    if (v === "all") viewMode = "all";
+    else if (v && typeof v === "object" && "dancerIds" in v && Array.isArray(v.dancerIds)) {
+      viewMode = { dancerIds: v.dancerIds.filter((x): x is number => typeof x === "number") };
+    } else if (v && typeof v === "object" && "dancerId" in v && typeof v.dancerId === "number") {
+      viewMode = { dancerIds: [v.dancerId] };
+    }
     return {
-      viewMode: parsed.viewMode ?? "all",
+      viewMode,
       showGhostEvents: parsed.showGhostEvents ?? false,
       selectedEventId: parsed.selectedEventId ?? null,
     };
@@ -85,6 +99,23 @@ export function EditorClient() {
   const [selectedEventId, setSelectedEventIdState] = useState<string | null>(null);
   const [currentBeat, setCurrentBeat] = useState(0);
   const [playing, setPlaying] = useState(false);
+
+  // Controlled value for the "Jump to section…" select. Persisted only in
+  // memory: we want the select to keep showing the chosen section name after
+  // the user picks one, but it should reset when the playhead moves elsewhere
+  // (Play / Reset / direct ruler-click) so it doesn't lie about state.
+  const [jumpedSectionId, setJumpedSectionId] = useState<string>("");
+
+  // Event modal — used for both personal (lockedDancerId set) and common
+  // (lockedDancerId undefined) creation flows. The playhead position and
+  // the dancer list are frozen at open time so the modal is stable while the
+  // user authors the event.
+  const [eventModal, setEventModal] = useState<{
+    open: boolean;
+    startBeat: number;
+    defaultDancerIds: number[];
+    lockedDancerId?: number;
+  }>({ open: false, startBeat: 0, defaultDancerIds: [] });
 
   // Load + migrate on first mount.
   useEffect(() => {
@@ -147,14 +178,22 @@ export function EditorClient() {
   const inCloud = cloud.state !== null;
 
   // Publish presence: which dance / event / view we're currently looking at.
+  // `dancerTab` is a single int for backward-compat with consumers (e.g.
+  // MembersPanel); when multiple dancers are selected we surface the lowest
+  // id, and -1 means "all".
   useEffect(() => {
     if (!inCloud) return;
+    const dancerTab =
+      viewMode === "all"
+        ? -1
+        : viewMode.dancerIds[0] !== undefined
+          ? viewMode.dancerIds[0]
+          : -1;
     updateMyPresence({
       currentDanceId: dance?.id,
       currentEventId: selectedEventId ?? undefined,
       currentView: "editor",
-      dancerTab:
-        viewMode === "all" ? -1 : Number(viewMode.dancerId) || 0,
+      dancerTab,
     });
   }, [inCloud, updateMyPresence, dance?.id, selectedEventId, viewMode]);
 
@@ -383,27 +422,89 @@ export function EditorClient() {
     setSelectedEventId(clone.id);
   };
 
-  const handleAddEvent = () => {
+  // Move the playhead. Used by the BeatRuler (click + drag), the manual
+  // input box, and Reset. Always pauses playback so dragging doesn't fight
+  // the requestAnimationFrame loop. Resets the jump-to-section dropdown
+  // because the playhead is no longer "at" that section.
+  const handleSeek = (beat: number) => {
     if (!dance) return;
-    const events = dance.timelineEvents ?? [];
-    const lastEnd = events.reduce((m, e) => Math.max(m, e.startBeat + e.durationBeats), 0);
-    const dancerId = viewMode === "all" ? dance.dancers[0]?.id : viewMode.dancerId;
-    const fresh = buildEmptyEvent(dance, {
-      ...(dancerId !== undefined ? { dancerId } : {}),
-      startBeat: lastEnd,
-    });
-    commitDance({ ...dance, timelineEvents: [...events, fresh] });
-    setSelectedEventId(fresh.id);
+    if (playing) setPlaying(false);
+    const snapped = Math.max(0, snapBeat(beat, dance.beatUnit));
+    setCurrentBeat(snapped);
+    setJumpedSectionId("");
   };
 
+  // Personal event entry point — opens the event modal locked to one
+  // dancer. The modal handles authoring (duration, clearBefore, label,
+  // actions) and runs the overlap check against the user-chosen duration on
+  // Apply, so a tight gap can be filled by shrinking the duration.
+  const handleAddPersonalEvent = (dancerId: number) => {
+    if (!dance) return;
+    setEventModal({
+      open: true,
+      startBeat: snapBeat(currentBeat, dance.beatUnit),
+      defaultDancerIds: [dancerId],
+      lockedDancerId: dancerId,
+    });
+  };
+
+  // Common event entry point — opens the event modal in multi-dancer mode.
+  // Pre-fills with the dancers visible in the current ViewMode.
+  const openCommonEventModal = () => {
+    if (!dance) return;
+    const startBeat = snapBeat(currentBeat, dance.beatUnit);
+    const visible =
+      viewMode === "all"
+        ? dance.dancers.map((d) => d.id)
+        : viewMode.dancerIds.filter((id) => dance.dancers.some((d) => d.id === id));
+    setEventModal({
+      open: true,
+      startBeat,
+      defaultDancerIds: visible.length > 0 ? visible : dance.dancers.map((d) => d.id),
+    });
+  };
+
+  // Modal Apply callback: receives a list of fully-formed personal events
+  // (already overlap-checked inside the modal). Append + select the first.
+  const handleApplyEventModal = (newEvents: TimelineEvent[]) => {
+    if (!dance) return;
+    if (newEvents.length === 0) {
+      setEventModal((prev) => ({ ...prev, open: false }));
+      return;
+    }
+    const events = dance.timelineEvents ?? [];
+    commitDance({ ...dance, timelineEvents: [...events, ...newEvents] });
+    setSelectedEventId(newEvents[0]!.id);
+    setEventModal((prev) => ({ ...prev, open: false }));
+  };
+
+  // Section: drops a marker at the current playhead. No prompt for a beat —
+  // sections are pure ruler markers now, and the visual playhead is the
+  // location indicator.
   const addSection = () => {
     if (!dance) return;
-    const startBeat = totalBeatsOf(dance);
-    const fresh = createEmptySection();
-    commitDance({
-      ...dance,
-      sections: [...dance.sections, { ...fresh, startBeat, steps: [] }],
-    });
+    const startBeat = snapBeat(currentBeat, dance.beatUnit);
+    const name = window.prompt(`Section name (at beat ${startBeat}):`, "New Section");
+    if (name === null || name.trim() === "") return;
+    const fresh = createEmptySection(name.trim());
+    const sections = [
+      ...dance.sections,
+      { ...fresh, startBeat, steps: [] },
+    ].sort((a, b) => (a.startBeat ?? 0) - (b.startBeat ?? 0));
+    commitDance({ ...dance, sections });
+  };
+
+  // Jump-to-section dropdown. Stays selected on the chosen section so the
+  // user can see where they last jumped to; handleSeek clears it again as
+  // soon as the playhead moves elsewhere.
+  const handleJumpToSection = (sectionId: string) => {
+    if (!dance) return;
+    if (sectionId === "") return;
+    const s = dance.sections.find((x) => x.id === sectionId);
+    if (!s) return;
+    setPlaying(false);
+    setCurrentBeat(snapBeat(s.startBeat ?? 0, dance.beatUnit));
+    setJumpedSectionId(sectionId);
   };
 
   const warnings = useMemo(
@@ -524,7 +625,7 @@ export function EditorClient() {
             onShowGhostEventsChange={setShowGhostEvents}
           />
 
-          <div className="row" style={{ gap: 6 }}>
+          <div className="row" style={{ gap: 6, flexWrap: "wrap", alignItems: "center" }}>
             <button
               className={playing ? "" : "primary"}
               onClick={() => setPlaying((p) => !p)}
@@ -535,13 +636,45 @@ export function EditorClient() {
               onClick={() => {
                 setPlaying(false);
                 setCurrentBeat(0);
+                setJumpedSectionId("");
               }}
             >
               ↺ Reset
             </button>
-            <span className="muted" style={{ fontSize: 12 }}>
-              currentBeat: {currentBeat.toFixed(2)} / {totalBeatsOf(dance)}
-            </span>
+            <label className="row" style={{ gap: 4, fontSize: 12 }}>
+              <span className="group-label">Beat</span>
+              <input
+                type="number"
+                min={0}
+                step={dance.beatUnit}
+                value={currentBeat}
+                onChange={(e) => handleSeek(Number(e.target.value))}
+                style={{ width: 80 }}
+                title="Move the playhead by typing a beat number"
+              />
+              <span className="muted" style={{ fontSize: 11 }}>
+                / {totalBeatsOf(dance)}
+              </span>
+            </label>
+            {dance.sections.length > 0 && (
+              <label className="row" style={{ gap: 4, fontSize: 12 }}>
+                <span className="group-label">Jump to</span>
+                <select
+                  value={jumpedSectionId}
+                  onChange={(e) => handleJumpToSection(e.target.value)}
+                  title="Move the playhead to the start of a section"
+                >
+                  <option value="">section…</option>
+                  {[...dance.sections]
+                    .sort((a, b) => (a.startBeat ?? 0) - (b.startBeat ?? 0))
+                    .map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} (beat {s.startBeat ?? 0})
+                      </option>
+                    ))}
+                </select>
+              </label>
+            )}
           </div>
 
           <TimelineEditor
@@ -553,8 +686,23 @@ export function EditorClient() {
             currentBeat={currentBeat}
             editorsByEventId={editorsByEventId}
             onSelectEvent={setSelectedEventId}
-            onAddEvent={handleAddEvent}
+            onSeek={handleSeek}
+            onAddPersonalEvent={handleAddPersonalEvent}
+            onOpenCommonEventModal={openCommonEventModal}
             onAddSection={addSection}
+          />
+
+          <EventModal
+            isOpen={eventModal.open}
+            dance={dance}
+            customAnimations={customAnimationsForUi}
+            startBeat={eventModal.startBeat}
+            defaultDancerIds={eventModal.defaultDancerIds}
+            {...(eventModal.lockedDancerId !== undefined
+              ? { lockedDancerId: eventModal.lockedDancerId }
+              : {})}
+            onApply={handleApplyEventModal}
+            onCancel={() => setEventModal((prev) => ({ ...prev, open: false }))}
           />
 
           <TimelineWarningsPanel

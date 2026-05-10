@@ -16,20 +16,16 @@ interface Props {
   currentBeat: number;
   editorsByEventId?: Record<string, string>;
   onSelectEvent: (id: string) => void;
-  onAddEvent: () => void;
+  onSeek: (beat: number) => void;
+  // Per-dancer "+ Event" button (renders next to the dancer label). Creates a
+  // personal event locked to this dancer.
+  onAddPersonalEvent: (dancerId: number) => void;
+  // Top "+ Common Event" button — opens the modal in the parent.
+  onOpenCommonEventModal: () => void;
+  // Section creation — parent inserts at the current playhead position.
   onAddSection: () => void;
 }
 
-// Two-column layout:
-//   - Left  (sticky, 120px): dancer name labels, never moves while the
-//     timeline scrolls horizontally. The first row is a spacer so the labels
-//     align with the dancer rows below the ruler.
-//   - Right (scrollable): BeatRuler on top, then one DancerTrack per row.
-//     Both share the same horizontal scroll, so beat ticks align with events.
-//
-// This separation is what fixes "events at beat 0..2 hide behind the label" —
-// the labels live in their own column instead of being stacked over the
-// track via position:sticky.
 export function TimelineEditor({
   dance,
   viewMode,
@@ -39,7 +35,9 @@ export function TimelineEditor({
   currentBeat,
   editorsByEventId,
   onSelectEvent,
-  onAddEvent,
+  onSeek,
+  onAddPersonalEvent,
+  onOpenCommonEventModal,
   onAddSection,
 }: Props) {
   const totalBeats = Math.max(8, totalBeatsOf(dance) + 4);
@@ -47,24 +45,32 @@ export function TimelineEditor({
   const events = dance.timelineEvents ?? [];
 
   const tracks = useMemo(() => {
-    if (viewMode === "all") {
+    const visibleDancers =
+      viewMode === "all"
+        ? dancers
+        : dancers.filter((d) => viewMode.dancerIds.includes(d.id));
+    if (visibleDancers.length === 0) {
       return dancers.map((d) => ({
         dancer: d,
         events: events.filter((e) => eventsTouchingDancer(e, d.id)),
         ghosts: [] as TimelineEvent[],
       }));
     }
-    const focusedId = viewMode.dancerId;
-    const focused =
-      dancers.find((d) => d.id === focusedId) ?? { id: focusedId, name: `Dancer ${focusedId}` };
-    const own = events.filter((e) => eventsTouchingDancer(e, focusedId));
-    const ghosts = showGhostEvents
-      ? events.filter((e) => !eventsTouchingDancer(e, focusedId))
-      : [];
-    return [{ dancer: focused, events: own, ghosts }];
+    const visibleIds = new Set(visibleDancers.map((d) => d.id));
+    const showGhosts = viewMode !== "all" && showGhostEvents;
+    return visibleDancers.map((d) => {
+      const own = events.filter((e) => eventsTouchingDancer(e, d.id));
+      const ghosts = showGhosts
+        ? events.filter((e) => {
+            if (eventsTouchingDancer(e, d.id)) return false;
+            return e.actions.some((a) => a.dancers.some((x) => !visibleIds.has(x)));
+          })
+        : [];
+      return { dancer: d, events: own, ghosts };
+    });
   }, [viewMode, showGhostEvents, dancers, events]);
 
-  const labelColumnWidth = 120;
+  const labelColumnWidth = 168;
   const rulerHeight = 32;
   const rowHeight = 44;
 
@@ -76,13 +82,21 @@ export function TimelineEditor({
           {events.length} events · {totalBeatsOf(dance)} beats · BPM {dance.bpm}
         </span>
         <span className="spacer" />
-        <button onClick={onAddSection}>+ Section</button>
-        <button className="primary" onClick={onAddEvent}>+ Event</button>
+        <button onClick={onAddSection} title="Insert a section at the current playhead">
+          + Section
+        </button>
+        <button
+          className="primary"
+          onClick={onOpenCommonEventModal}
+          title="Pick dancers + author actions in a modal; on Apply each dancer gets their own personal event"
+        >
+          + Common Event
+        </button>
       </div>
 
       <div style={{ overflow: "auto", maxHeight: 480 }}>
         <div style={{ display: "flex", minWidth: "fit-content" }}>
-          {/* Left column: sticky dancer labels */}
+          {/* Left column: sticky dancer labels + per-dancer Add button */}
           <div
             style={{
               position: "sticky",
@@ -123,10 +137,28 @@ export function TimelineEditor({
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
+                    flex: 1,
                   }}
+                  title={t.dancer.name}
                 >
                   {t.dancer.name}
                 </span>
+                <button
+                  onClick={() => onAddPersonalEvent(t.dancer.id)}
+                  title={`Add a personal event for ${t.dancer.name} at the playhead`}
+                  style={{
+                    fontSize: 11,
+                    padding: "2px 6px",
+                    minWidth: 28,
+                    background: "#1f6feb",
+                    color: "white",
+                    border: "none",
+                    borderRadius: 3,
+                    cursor: "pointer",
+                  }}
+                >
+                  + Event
+                </button>
               </div>
             ))}
             {tracks.length === 0 && (
@@ -139,7 +171,7 @@ export function TimelineEditor({
             )}
           </div>
 
-          {/* Right column: ruler + tracks, share horizontal scroll */}
+          {/* Right column: ruler (interactive) + tracks, share horizontal scroll */}
           <div style={{ flex: "0 0 auto" }}>
             <BeatRuler
               totalBeats={totalBeats}
@@ -147,6 +179,7 @@ export function TimelineEditor({
               beatUnit={dance.beatUnit}
               sections={dance.sections}
               currentBeat={currentBeat}
+              onSeek={onSeek}
             />
             {tracks.map((t) => (
               <DancerTrack

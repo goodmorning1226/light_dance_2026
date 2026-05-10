@@ -4,11 +4,10 @@ import type {
   CustomAnimation,
   DanceAction,
   DanceProject,
-  DanceSection,
   TimelineEvent,
 } from "@/types";
 import { ActionEditor } from "./ActionEditor";
-import { snapBeat } from "@/lib/editor/timelineHelpers";
+import { findSectionForBeat, snapBeat } from "@/lib/editor/timelineHelpers";
 import { createEmptyAnimationAction, createEmptyStaticAction } from "@/lib/editor/factories";
 
 interface Props {
@@ -29,22 +28,66 @@ export function TimelineEventEditor({
   onDuplicate,
 }: Props) {
   const beatUnit = dance.beatUnit > 0 ? dance.beatUnit : 0.5;
+  const isPersonal = event.lockedDancerId !== undefined;
+  const lockedDancer = isPersonal
+    ? dance.dancers.find((d) => d.id === event.lockedDancerId)
+    : undefined;
 
-  const updateAction = (idx: number, next: DanceAction) =>
-    onChange({ ...event, actions: event.actions.map((a, i) => (i === idx ? next : a)) });
+  // For personal events, force every action's dancers list to exactly the
+  // locked dancer ID so the data and the locked-UI never disagree (e.g.
+  // legacy JSON imports with extra dancers).
+  const updateAction = (idx: number, next: DanceAction) => {
+    const fixed: DanceAction = isPersonal
+      ? { ...next, dancers: [event.lockedDancerId as number] }
+      : next;
+    onChange({ ...event, actions: event.actions.map((a, i) => (i === idx ? fixed : a)) });
+  };
 
   const deleteAction = (idx: number) =>
     onChange({ ...event, actions: event.actions.filter((_, i) => i !== idx) });
 
   const addAction = (kind: "static" | "animation") => {
     const fresh = kind === "static" ? createEmptyStaticAction() : createEmptyAnimationAction();
+    if (isPersonal) fresh.dancers = [event.lockedDancerId as number];
     onChange({ ...event, actions: [...event.actions, fresh] });
   };
 
+  // When startBeat changes, also re-infer sectionId so codegen groups the
+  // event into whatever section visually contains the new position. The user
+  // never has to think about sectionId; sections are just markers on the
+  // ruler.
+  const setStartBeat = (raw: number) => {
+    const snapped = snapBeat(raw, beatUnit);
+    onChange({
+      ...event,
+      startBeat: snapped,
+      sectionId: findSectionForBeat(dance, snapped),
+    });
+  };
+
   return (
-    <div className="card" style={{ borderLeft: "4px solid #1f6feb" }}>
+    <div
+      className="card"
+      style={{ borderLeft: `4px solid ${isPersonal ? "#6366f1" : "#1f6feb"}` }}
+    >
       <div className="row" style={{ marginBottom: 8 }}>
-        <strong>Event</strong>
+        <strong>{isPersonal ? "Personal Event" : "Event"}</strong>
+        {isPersonal && (
+          <span
+            style={{
+              padding: "2px 8px",
+              borderRadius: 999,
+              fontSize: 11,
+              fontWeight: 600,
+              background: "#e0e7ff",
+              border: "1px solid #6366f1",
+              color: "#3730a3",
+            }}
+          >
+            🔒 #{event.lockedDancerId}
+            {lockedDancer ? ` · ${lockedDancer.name}` : ""}
+          </span>
+        )}
         <span className="muted" style={{ fontFamily: "monospace", fontSize: 11 }}>{event.id}</span>
         <span className="spacer" />
         <button onClick={onDuplicate} title="Duplicate">⧉</button>
@@ -59,7 +102,7 @@ export function TimelineEventEditor({
             min={0}
             step={beatUnit}
             value={event.startBeat}
-            onChange={(e) => onChange({ ...event, startBeat: snapBeat(Number(e.target.value), beatUnit) })}
+            onChange={(e) => setStartBeat(Number(e.target.value))}
             style={{ width: 90 }}
           />
         </label>
@@ -87,25 +130,11 @@ export function TimelineEventEditor({
           />
           <span className="group-label">clearBefore</span>
         </label>
-      </div>
-
-      <div className="row" style={{ gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
-        <label className="row" style={{ gap: 4 }}>
-          <span className="group-label">section</span>
-          <select
-            value={event.sectionId}
-            onChange={(e) => onChange({ ...event, sectionId: e.target.value })}
-          >
-            {dance.sections.map((s) => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
-        </label>
-        <label className="row" style={{ gap: 4, flex: 1 }}>
+        <label className="row" style={{ gap: 4, flex: 1, minWidth: 200 }}>
           <span className="group-label">label</span>
           <input
             value={event.label ?? ""}
-            placeholder="(optional, displayed on the timeline tooltip)"
+            placeholder="(shown on the timeline block)"
             onChange={(e) => {
               const next: TimelineEvent = { ...event };
               const v = e.target.value;
@@ -127,6 +156,7 @@ export function TimelineEventEditor({
             customAnimations={customAnimations}
             onChange={(next) => updateAction(i, next)}
             onDelete={() => deleteAction(i)}
+            {...(isPersonal ? { hideDancers: true } : {})}
           />
         ))}
         <div className="row" style={{ gap: 6 }}>
@@ -138,24 +168,3 @@ export function TimelineEventEditor({
   );
 }
 
-export function buildEmptyEvent(
-  dance: DanceProject,
-  defaults: { sectionId?: string; startBeat?: number; dancerId?: number },
-): TimelineEvent {
-  const beatUnit = dance.beatUnit > 0 ? dance.beatUnit : 0.5;
-  const fallbackSection: DanceSection | undefined = dance.sections[dance.sections.length - 1] ?? dance.sections[0];
-  const sectionId = defaults.sectionId ?? fallbackSection?.id ?? "section-default";
-  const startBeat = snapBeat(defaults.startBeat ?? 0, beatUnit);
-
-  const action = createEmptyStaticAction();
-  if (defaults.dancerId !== undefined) action.dancers = [defaults.dancerId];
-
-  return {
-    id: `evt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-    sectionId,
-    startBeat,
-    durationBeats: Math.max(beatUnit, 1),
-    clearBefore: false,
-    actions: [action],
-  };
-}

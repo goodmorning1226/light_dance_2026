@@ -6,6 +6,12 @@ import type { DanceAction } from "./dance";
 //
 // `sectionId` groups events for navigation / labeling but does NOT affect
 // playback timing (events are sorted globally by startBeat at codegen time).
+//
+// `lockedDancerId` marks a "personal" event created via the per-dancer
+// `+ Event` button on the timeline label column: when set, the editor hides
+// the dancer-selection UI and forces every action's `dancers` to be exactly
+// `[lockedDancerId]`. "Common" events (created via the top-level button with
+// a multi-dancer picker) leave this field undefined.
 export interface TimelineEvent {
   id: string;
   sectionId: string;
@@ -15,4 +21,5 @@ export interface TimelineEvent {
   actions: DanceAction[];
   label?: string;
   note?: string;
+  lockedDancerId?: number;
 }

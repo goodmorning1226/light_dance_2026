@@ -127,3 +127,41 @@ export function collectTimelineWarnings(dance: DanceProject): TimelineWarning[] 
 export function orderedDancers(dance: DanceProject): Dancer[] {
   return [...dance.dancers].sort((a, b) => a.id - b.id);
 }
+
+// Pick the section a given beat belongs to: the section with the largest
+// startBeat ≤ beat. Falls back to the first section, then to a sentinel id.
+// Used to auto-assign sectionId when the user creates / moves an event so
+// they never have to think about which section it lives in.
+export function findSectionForBeat(dance: DanceProject, beat: number): string {
+  if (dance.sections.length === 0) return "section-default";
+  const sorted = [...dance.sections].sort(
+    (a, b) => (a.startBeat ?? 0) - (b.startBeat ?? 0),
+  );
+  let chosen = sorted[0]!;
+  for (const s of sorted) {
+    if ((s.startBeat ?? 0) <= beat) chosen = s;
+    else break;
+  }
+  return chosen.id;
+}
+
+// True if a candidate event range [startBeat, startBeat+durationBeats) would
+// overlap any existing event already touching this dancer (excluding the
+// event with `ignoreEventId`, used when re-validating an event being moved).
+// Half-open intervals: an event ending at exactly startBeat is fine.
+export function hasOverlapForDancer(
+  events: ReadonlyArray<TimelineEvent>,
+  dancerId: number,
+  startBeat: number,
+  durationBeats: number,
+  ignoreEventId?: string,
+): boolean {
+  const end = startBeat + durationBeats;
+  for (const e of events) {
+    if (ignoreEventId && e.id === ignoreEventId) continue;
+    if (!eventsTouchingDancer(e, dancerId)) continue;
+    const eEnd = e.startBeat + e.durationBeats;
+    if (e.startBeat < end && eEnd > startBeat) return true;
+  }
+  return false;
+}

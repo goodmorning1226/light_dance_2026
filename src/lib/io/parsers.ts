@@ -229,6 +229,9 @@ function parseTimelineEvent(
   };
   if (obj.label !== undefined) out.label = asString(obj.label, joinPath(path, "label"));
   if (obj.note !== undefined) out.note = asString(obj.note, joinPath(path, "note"));
+  if (obj.lockedDancerId !== undefined) {
+    out.lockedDancerId = asNumber(obj.lockedDancerId, joinPath(path, "lockedDancerId"));
+  }
   return out;
 }
 

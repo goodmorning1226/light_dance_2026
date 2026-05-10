@@ -18,6 +18,10 @@ interface Props {
   customAnimations: CustomAnimation[];
   onChange: (next: DanceAction) => void;
   onDelete: () => void;
+  // Hide the dancer-selection field. Used for personal events (the dancer is
+  // implicit from the event's lockedDancerId) and inside the Common Event
+  // modal (each selected dancer gets a copy of the action on Apply).
+  hideDancers?: boolean;
 }
 
 // Multi / Sequential live in BuiltInAnimationId but require a sub-animation
@@ -29,7 +33,14 @@ const SELECTABLE_BUILT_INS = BUILT_IN_ANIMATION_IDS.filter(
 
 const ANIMATIONS_NEEDING_PART = new Set(["ShowColor", "LTR", "RTL", "Center"]);
 
-export function ActionEditor({ action, dancers, customAnimations, onChange, onDelete }: Props) {
+export function ActionEditor({
+  action,
+  dancers,
+  customAnimations,
+  onChange,
+  onDelete,
+  hideDancers,
+}: Props) {
   const setDancers = (next: number[]) => onChange({ ...action, dancers: next });
   const setColor = (next: ColorRGB) => onChange({ ...action, color: next });
 
@@ -47,19 +58,59 @@ export function ActionEditor({ action, dancers, customAnimations, onChange, onDe
     onChange({ ...action, animationId: id });
   };
 
+  // Convert between static and animation. Drops fields incompatible with the
+  // target type and seeds defaults so the action is immediately valid.
+  const setActionType = (next: "static" | "animation") => {
+    if (next === action.type) return;
+    if (next === "static") {
+      const converted: DanceAction = {
+        type: "static",
+        dancers: action.dancers,
+        color: action.color,
+        parts: action.parts ?? (action.part ? [action.part] : ["whole"]),
+      };
+      onChange(converted);
+    } else {
+      const converted: DanceAction = {
+        type: "animation",
+        dancers: action.dancers,
+        color: action.color,
+        part: action.part ?? action.parts?.[0] ?? "whole",
+        animationId: action.animationId ?? "ShowColor",
+      };
+      onChange(converted);
+    }
+  };
+
   const isAnimation = action.type === "animation";
   const animId = action.animationId ?? "ShowColor";
-  const showPartSelector = !isAnimation || ANIMATIONS_NEEDING_PART.has(animId) || isCustom(animId, customAnimations);
+  const showPartSelector =
+    !isAnimation || ANIMATIONS_NEEDING_PART.has(animId) || isCustom(animId, customAnimations);
 
   return (
     <div
       className="card"
       style={{ background: isAnimation ? "#fef3c7" : "#dbeafe", borderColor: "transparent" }}
     >
-      <div className="row" style={{ marginBottom: 6 }}>
-        <strong style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: 0.05 }}>
-          {action.type}
-        </strong>
+      <div className="row" style={{ marginBottom: 6, gap: 6 }}>
+        <select
+          value={action.type}
+          onChange={(e) => setActionType(e.target.value as "static" | "animation")}
+          title="Switch action type"
+          style={{
+            fontSize: 12,
+            fontWeight: 700,
+            textTransform: "uppercase",
+            letterSpacing: 0.05,
+            background: "transparent",
+            border: "1px solid #94a3b8",
+            borderRadius: 4,
+            padding: "2px 6px",
+          }}
+        >
+          <option value="static">static</option>
+          <option value="animation">animation</option>
+        </select>
         <span className="spacer" />
         <button className="ghost danger" onClick={onDelete} title="Delete action">
           ✕
@@ -67,9 +118,11 @@ export function ActionEditor({ action, dancers, customAnimations, onChange, onDe
       </div>
 
       <div className="col" style={{ gap: 8 }}>
-        <Field label="Dancers">
-          <DancersCheckboxes dancers={dancers} selected={action.dancers} onChange={setDancers} />
-        </Field>
+        {!hideDancers && (
+          <Field label="Dancers">
+            <DancersCheckboxes dancers={dancers} selected={action.dancers} onChange={setDancers} />
+          </Field>
+        )}
 
         {isAnimation && (
           <Field label="Animation">

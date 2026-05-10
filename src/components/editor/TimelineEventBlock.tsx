@@ -85,16 +85,33 @@ export function TimelineEventBlock({
         transition: "border-color 0.1s",
       }}
     >
+      {event.label ? (
+        <div
+          style={{
+            fontSize: 11,
+            fontWeight: 700,
+            color: "#0f172a",
+            padding: "2px 4px 0",
+            textShadow: "0 0 4px rgba(255,255,255,0.6)",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {event.label}
+        </div>
+      ) : null}
       <div
         style={{
           fontSize: 10,
           fontWeight: 600,
           color: "#0f172a",
-          padding: "2px 4px",
+          padding: event.label ? "0 4px 2px" : "2px 4px",
           textShadow: "0 0 4px rgba(255,255,255,0.6)",
           whiteSpace: "nowrap",
           overflow: "hidden",
           textOverflow: "ellipsis",
+          opacity: event.label ? 0.75 : 1,
         }}
       >
         {event.startBeat}b · {summarise(event)}
